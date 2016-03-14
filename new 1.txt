@@ -1,0 +1,12 @@
+INSERT INTO \'mktequd000001\' (\'index\', \'secID\', \'ticker\', \'secShortName\', \'exchangeCD\', \'tradeDate\', \'preClosePrice\', \'actPreClosePrice\', \'openPrice\', \'highestPrice\', \'lowestPrice\', \'closePrice\', \'turnoverVol\', \'turnoverValue\', \'dealAmount\', \'turnoverRate\', \'accumAdjFactor\', \'negMarketValue\', \'marketValue\', \'PE\', \'PB\', \'isOpen\') VALUES (\'222\', \'32423\', \'1\', \'rerw\', \'rtyrty\', \'12231\', \'423432\', \'54\', \'2\', \'3\', \'21\', \'45\', \'43534\', \'45435\', \'231\', \'3243\', \'32423\', \'3242\', \'3423\', \'\', \'12\', \'3423\')
+
+'INSERT INTO \'mktequd000001\' (\'index\', \'secID\', \'ticker\', \'secShortName\', \'exchangeCD\', \'tradeDate\', \'preClosePrice\', \'actPreClosePrice\', \'openPrice\', \'highestPrice\', \'lowestPrice\', \'closePrice\', \'turnoverVol\', \'turnoverValue\', \'dealAmount\', \'turnoverRate\', \'accumAdjFactor\', \'negMarketValue\', \'marketValue\', \'PE\', ,\'PE1\', \'PB\', \'isOpen\') VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)' % (dd[0],dd[1],dd[2],dd[3],dd[4],dd[5],dd[6],dd[7],dd[8],dd[9],dd[10],dd[11],dd[12],dd[13],dd[14],dd[15],dd[16],dd[17],dd[18],dd[19],dd[20],dd[21],dd[22])
+
+ALTER TABLE `mktequd603999`
+MODIFY COLUMN `tradeDate`  text CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL AFTER `exchangeCD`,
+ADD PRIMARY KEY (`tradeDate`);
+
+
+ALTER TABLE `mktequd603998`
+MODIFY COLUMN `tradeDate`  varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' AFTER `exchangeCD`,
+ADD PRIMARY KEY (`tradeDate`);
