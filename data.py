@@ -385,11 +385,14 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
+    data.FetchDayData('20160311')
+    data.UpdateDaysData('20160311')
+
     # data.FetchAllHistoryDayData()
     # data.FetchTodayDayData()
     # data.UpdateDaysData(util.getTodayYYmmddStr())
 
-    data.CountTuijianStockData()
+    # data.CountTuijianStockData()
 
     # print data.remainAll
     # data.FetchHistoryDayData('603999','20151210')
