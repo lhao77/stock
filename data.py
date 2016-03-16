@@ -41,20 +41,9 @@ import pandas as pd
 # df = st.MktEqudM(ticker='000001',monthEndDate=str)
 # df.to_sql('datayest_000001',engine,if_exists='append')
 
-# 获取所有股票的前复权因子
-# st = ts.Market()
-# maxids = 50
-# idx = 0
-# l = len(all)
-# while(idx<l):
-#     str_ticker = ','.join( ('%06d' % a[0]) for a in all[idx:idx+maxids] )
-#     idx = idx+maxids
-    # df = st.MktAdjf(ticker=str_ticker)
-    # df.to_sql('datayest_MktAdjf',engine,if_exists='append')
-    # df = st.MktAdjfAf(ticker=str_ticker)
-    # df.to_sql('datayest_MktAdjfAf',engine,if_exists='append')
 # 获取全部股票数据，用线程？？
 # 结合前复权因子。。
+
 
 ########################################
 # 获取全部股票基本信息
@@ -194,7 +183,7 @@ class Data():
 
     #初始化数据
     def InitData(self):
-        self.FetchAllStocksBasicInfo()
+        # self.FetchAllStocksBasicInfo()
         cur = init.getCursor()
         cur.execute(r' select * from datayest_equ')
         self.allStocksBasicInfo = cur.fetchall()
@@ -223,6 +212,25 @@ class Data():
             if a.find(name)!=-1 :
                 return True
         return False
+
+    # 获取所有股票的前复权因子
+    def FetchAllStockQfqFactor(self):
+        cur = init.getCursor()
+        conn = init.getConn()
+        #先删除表
+        sql = 'drop table if exists datayest_MktAdjf'
+        cur.execute(sql)
+        conn.commit()
+
+        st = init.ts.Market()
+        maxids = 50
+        idx = 0
+        l = len(self.allStocksBasicInfo)
+        while(idx<l):
+            str_ticker = ','.join( ('%06d' % a[2]) for a in (self.allStocksBasicInfo)[idx:idx+maxids] )
+            idx = idx+maxids
+            df = st.MktAdjf(ticker=str_ticker)
+            df.to_sql('datayest_MktAdjf',init.getEngine(),if_exists='append')
 
     #获取股票tick的历史日线数据,beg不填写的话为第一天上市的日期（%Y%m%d格式），end不填写的话为最新日期
     def FetchHistoryDayData(self,ticker,beg=None,end=None,st=init.ts.Market()):
@@ -268,42 +276,42 @@ class Data():
         todayStr = util.getTodayYYmmddStr()
         self.FetchDayData(todayStr)
 
-    #获取指定日期的日行情数据
+    #获取指定日期的日行情数据，并把数据更新到各张表中
     def FetchDayData(self,dateStr):
         st = init.ts.Market()
         df = st.MktEqud(tradeDate=dateStr)
         bGetData = df.shape[0]>0
         if bGetData:
             print '成功获取%s的日行情数据' % dateStr
-            df.to_sql( ('%smktequd' % dateStr), init.g_engine)
+            # df.to_sql( ('%smktequd' % dateStr), init.g_engine, if_exists='replace')
         else:
             print '未获取到%s的日行情数据' % dateStr
         #将今日行情数据插入到各张表中
         if bGetData:
-            pass
+            self.UpdateDaysData(dateStr,df)
 
     #更新日行情数据
-    def UpdateDaysData(self,tradeDate):
+    def UpdateDaysData(self,tradeDate,df):
         theDate = ('%smktequd' % tradeDate)
-        df = pd.read_sql( ('select * from %smktequd' % tradeDate),init.g_conn)
         print df.shape
         cur = init.getCursor()
         conn = init.getConn()
-        # cur.execute("SET NAMES utf8") #or utf8 or any other charset you want to handle
-        # cur.execute("SET CHARACTER SET utf8") #same as above
-        # cur.execute("SET character_set_connection=utf8") #same as above
 
         for i in range(0,df.shape[0]):    #(df.shape[0]):
             dd = df.iloc[i] #获取一行
-            tableName = 'mktequd%06d' % dd[2]
+            tableName = 'mktequd%06d' % dd[1]
             #判断表是否存在
             bExist = self.IsTableExist(tableName)
             if bExist==True :
-                n = cur.execute('select `index` from %s' % tableName)   #获取index值   dd[3].decode('utf-8')
-                insertSql = 'INSERT INTO %s (`index`, secID, ticker, secShortName, exchangeCD, tradeDate, preClosePrice, actPreClosePrice, openPrice, highestPrice, lowestPrice, closePrice, turnoverVol, turnoverValue, dealAmount, turnoverRate, accumAdjFactor, negMarketValue, marketValue, PE, PE1, PB, isOpen) VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\')' % (tableName,n,dd[1],dd[2],dd[3],dd[4],dd[5],dd[6],dd[7],dd[8],dd[9],dd[10],dd[11],dd[12],dd[13],dd[14],dd[15],dd[16],dd[17],dd[18],dd[19],dd[20],dd[21],dd[22])
-                print insertSql
-                cur.execute(insertSql)
+                try:
+                    n = cur.execute('select `index` from %s' % tableName)   #获取index值   dd[3].decode('utf-8')
+                    insertSql = 'INSERT INTO %s (`index`, secID, ticker, secShortName, exchangeCD, tradeDate, preClosePrice, actPreClosePrice, openPrice, highestPrice, lowestPrice, closePrice, turnoverVol, turnoverValue, dealAmount, turnoverRate, accumAdjFactor, negMarketValue, marketValue, PE, PE1, PB, isOpen) VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\')' % (tableName,n,dd[0],dd[1],dd[2],dd[3],dd[4],dd[5],dd[6],dd[7],dd[8],dd[9],dd[10],dd[11],dd[12],dd[13],dd[14],dd[15],dd[16],dd[17],dd[18],dd[19],dd[20],dd[21])
+                    print insertSql
+                    cur.execute(insertSql)
+                except init.MySQLdb.Error,e:
+                    print "Mysql Error %d: %s" % (e.args[0], e.args[1])
         conn.commit()
+        cur.close()
 
     #更改所有股票日行情表的，设置日期主键
 # ALTER TABLE `mktequd000001`
@@ -327,8 +335,6 @@ class Data():
                     print altSql
                     cur.execute(altSql)
                     break
-        #
-        # cur.execute('ALTER TABLE `mktequd000001` MODIFY COLUMN `tradeDate`  varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT \'\' AFTER `exchangeCD`, ADD PRIMARY KEY (`tradeDate`)')
 
     # 统计大V荐股准确性(针对石老A的超短群)
     def CountTuijianStockData(self):
@@ -340,17 +346,23 @@ class Data():
             dd = df.iloc[i]
             if dd['percent_1day']==None :
                 # 根据时间和id计算涨幅
-                sql = 'select * from %s where tradeDate=\'%s\'' %(('mktequd%s' % dd['tuijian_stock_id']),time.strftime('%Y-%m-%d', time.strptime(dd['tuijian_time'], '%Y%m%d')))
+                tableName = ('mktequd%s' % dd['tuijian_stock_id'])
+                sql = 'select * from %s where tradeDate=\'%s\'' %(tableName,time.strftime('%Y-%m-%d', time.strptime(dd['tuijian_time'], '%Y%m%d')))
                 print sql
                 n=cur.execute(sql)
                 if n==1:
                     the = cur.fetchall()
-                    the[0]
-                pass
+                    percent = (the[0][11]-the[0][8])/the[0][7]
+                    # UPDATE `_tuijian_stock` SET `percent_1day`='0.1' WHERE (`name`='JOJO') AND (`tuijian_stock_id`='002074') AND (`tuijian_time`='20160314')
+                    sql =  'UPDATE `_tuijian_stock` SET `percent_1day`=\'%s\' WHERE (`name`=\'%s\') AND (`tuijian_stock_id`=\'%s\') AND (`tuijian_time`=\'%s\')' % (percent,dd['name'],dd['tuijian_stock_id'],dd['tuijian_time'])
+                    print sql
+                    cur.execute(sql)
             if dd['percent_2day']==None :
                 pass
             if dd['percent_3day']==None :
                 pass
+        conn.commit()
+        cur.close()
 
     #Test 找出存在的表，但是在datayest_equ中不存在
     def test(self):
@@ -385,14 +397,16 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
-    data.FetchDayData('20160311')
-    data.UpdateDaysData('20160311')
+    # data.FetchAllStockQfqFactor()
+
+    # data.FetchDayData('20160314')
+    # data.FetchDayData('20160315')
 
     # data.FetchAllHistoryDayData()
     # data.FetchTodayDayData()
     # data.UpdateDaysData(util.getTodayYYmmddStr())
 
-    # data.CountTuijianStockData()
+    data.CountTuijianStockData()
 
     # print data.remainAll
     # data.FetchHistoryDayData('603999','20151210')
