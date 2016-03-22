@@ -8,13 +8,14 @@ import datetime
 from time import sleep
 import random
 import pandas as pd
+
 # ##############################################################
 #数据类
 class Data():
     def __init__(self):
         self.allStocksBasicInfo = None  #所有的股票基本信息，从datayest_equ中查取的
-        self.allExistTables = list()    #所有已经存在的表信息
-        self.remainAll = list()    #剩余待查取的股票代码list
+        self.allExistTables = set([])    #所有已经存在的表信息
+        self.remainAll = set([])    #剩余待查取的股票代码list
         self.fails = set([]) #下载失败的股票ticker
         self._config = None  #配置信息
         self.qfqFactor = None #前复权因子
@@ -31,7 +32,7 @@ class Data():
         cur = init.getCursor()
         conn = init.getConn()
         #先删除表
-        sql = 'drop table if exists datayest_MktAdjf'
+        sql = init.g_dropSql % 'datayest_MktAdjf'
         cur.execute(sql)
         conn.commit()
 
@@ -47,16 +48,10 @@ class Data():
             df.to_sql('datayest_MktAdjf',init.getEngine(),if_exists='append')
         self.qfqFactor = df
 
-    #获取基本数据
-    def FetchBasic(self):
-        # 更新股票基本信息表和前复权因子表
-        self.FetchAllStocksBasicInfo()
-        self.FetchAllStockQfqFactor()
-
     #初始化数据
     def InitData(self):
         # 初始化config
-        df = pd.read_sql( 'select * from _config', init.g_conn)
+        df = pd.read_sql( init.g_selectSql % '_config', init.g_conn)
         if df.shape[0]==1:
             self._config = df.iloc[0]
 
@@ -70,21 +65,20 @@ class Data():
         bn = lastDate.date()<today.date()
         if bn:
             self.FetchAllStocksBasicInfo()
+            self.FetchAllStockQfqFactor()
 
         # 初始化股票基本信息表
         if self.allStocksBasicInfo is None :
-            self.allStocksBasicInfo = pd.read_sql( 'select * from datayest_equ', init.g_conn)
-        # print '共有 %s支股票' % n
-
-        # 临时屏蔽
-        # self.FetchAllStockQfqFactor()
+            self.allStocksBasicInfo = pd.read_sql( init.g_selct_datayest_equSql, init.getConn())
+        if self.qfqFactor is None :
+            self.qfqFactor = pd.read_sql(init.g_select_datayest_mktadjf, init.getConn())
 
         # 初始化已存在的表名
         cur = init.getCursor()
         cur.execute('show tables')
         allTmp = cur.fetchall()
         for a in allTmp:
-          self.allExistTables.append(a[0])
+          self.allExistTables.add(a[0])
         # print '已经爬取了%s支' % n  #不是正确的，但不影响结果，所以暂时不处理
 
         # 过滤已经爬取的数据
@@ -97,7 +91,7 @@ class Data():
                     bn = True
                     break
             if bn == False:
-                self.remainAll.append(dd)
+                self.remainAll.add(dd)
 
         # 更新历史日线数据
         self.FetchAllHistoryDayData()
@@ -112,6 +106,11 @@ class Data():
                 count = count-1
 
         #下载完成后，更新config表
+        # UPDATE `_config` SET `last_daysdata_update_date`='201603161' WHERE (`last_daysdata_update_date`='20160316')
+        sql = 'UPDATE `_config` SET `last_daysdata_update_date`=\'%s\' WHERE (`last_daysdata_update_date`=\'%s\')' % (today.strftime('%Y%m%d'), lastDate.strftime('%Y%m%d'))
+        cur.execute(sql)
+        init.getConn().commit()
+        cur.close()
 
     #根据表名判断表是否存在
     def IsTableExist(self,name):
@@ -140,10 +139,10 @@ class Data():
             else:  # 获取成功，保存到数据库中
                 tableName = ('MktEqud%s' % ticker)
                 df.to_sql(tableName, init.getEngine(), if_exists='append')
-                self.AddPrimaryKey(tableName)
+                self.AddPrimaryKey(init.getCursor(), tableName)
                 return True
         if bGetData == False:
-            fails.add(ticker)
+            self.fails.add(ticker)
             print '未获取到%s' % ticker
         return False
 
@@ -159,7 +158,7 @@ class Data():
             if n % 50 == 0:
                 sleep(random.uniform(1, 1.5))
 
-
+    # 2016-3-21 17:59:12
     #获取今日行情数据
     def FetchTodayDayData(self):
         todayStr = util.getTodayYYmmddStr()
@@ -221,7 +220,7 @@ class Data():
         conn = init.getConn()
         for a in self.allExistTables:
             for b in self.allStocksBasicInfo:
-                if a.find( ('%06d' % b[2]) )!=-1:
+                if a.find( ('%06d' % b[1]) )!=-1:
                     #执行更新命令
                     # altSql = ('ALTER TABLE `%s` MODIFY COLUMN `tradeDate`  varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT \'\' AFTER `exchangeCD`, ADD PRIMARY KEY (`tradeDate`)' % a)
                     # print altSql
@@ -260,27 +259,24 @@ class Data():
     #Test 找出存在的表，但是在datayest_equ中不存在
     def test(self):
         bb = list()
+        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
+
         for a in self.allExistTables:
             bFind = False
-            for b in self.allStocksBasicInfo:
-                if a.find( ('%06d' % b[2]) )!=-1:
-                    bFind = True
-                    break
-            if bFind==False:
+            num = filter(str.isdigit,a.encode('ascii'))
+            if num!='' and kk.has_key(int(num))==False:
                 bb.append(a)
         print(bb)
 
     # 找出在datayest_equ中存在但是未保存下来的表
     def test1(self):
         bb = list()
-        for b in self.allStocksBasicInfo:
-            bFind = False
-            for a in self.allExistTables:
-                if a.find( ('%06d' % b[2]) )!=-1:
-                    bFind = True
-                    break
+        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
+        for k in kk:
+            tableName = ('mktequd%06d' % k)
+            bFind = tableName in self.allExistTables
             if bFind==False:
-                bb.append(a)
+                bb.append(tableName)
         print bb
 
 ########################################################################
@@ -289,7 +285,6 @@ if __name__ == '__main__':
     init.init()
     data = Data()
     data.InitData()
-    # data.FetchAllHistoryDayData()
 
     # data.FetchDayData('20160314')
     # data.FetchDayData('20160315')
@@ -305,8 +300,8 @@ if __name__ == '__main__':
     # data.FetchAllHistoryDayData()
     # data.FetchDayData('20160311')
     # data.UpdateDaysData('20160311')
-    # data.test()
-    # data.test1()
+    data.test()
+    data.test1()
     # data.AddPrimaryKeyForDaysData()
 
     # 日行情的处理流程：
