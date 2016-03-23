@@ -22,6 +22,7 @@ class Data():
 
     # 获取全部股票基本信息
     def FetchAllStocksBasicInfo(self):
+        print '开始FetchAllStocksBasicInfo'
         eq = init.ts.Equity()
         df = eq.Equ(equTypeCD='A', listStatusCD='L', field='')
         df.to_sql('datayest_equ',init.getEngine(),if_exists='replace')
@@ -29,6 +30,7 @@ class Data():
 
     # 获取所有股票的前复权因子
     def FetchAllStockQfqFactor(self):
+        print '开始FetchAllStockQfqFactor'
         cur = init.getCursor()
         conn = init.getConn()
         #先删除表
@@ -59,9 +61,8 @@ class Data():
         bn = False  #是否需要下载数据
         lastDate = datetime.datetime.strptime(self._config['last_daysdata_update_date'], '%Y%m%d')
         today = datetime.datetime.now()
-        if today.hour<16 :
+        if today.hour<init.g_fetch_time :
             today = today - datetime.timedelta(hours=24)
-        # todayDate = today.strftime('%Y%m%d')
         bn = lastDate.date()<today.date()
         if bn:
             self.FetchAllStocksBasicInfo()
@@ -79,30 +80,29 @@ class Data():
         allTmp = cur.fetchall()
         for a in allTmp:
           self.allExistTables.add(a[0])
-        # print '已经爬取了%s支' % n  #不是正确的，但不影响结果，所以暂时不处理
-
         # 过滤已经爬取的数据
-        for i in range(0,self.allStocksBasicInfo.shape[0]) :
-            dd = self.allStocksBasicInfo.iloc[i]
-            tick = ('%06d' % dd[1])
-            bn = False
-            for h in self.allExistTables:
-                if h.find(tick) != -1:
-                    bn = True
-                    break
-            if bn == False:
-                self.remainAll.add(dd)
+        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
+        for k in kk:
+            tableName = '%s%06d' % (init.g_mktequd,k)
+            bFind = tableName in self.allExistTables
+            if bFind==False:
+                self.remainAll.append(tableName)
+                break
 
-        # 更新历史日线数据
+       # 更新历史日线数据
         self.FetchAllHistoryDayData()
+        # 更新指数日线数据
+        self.FetchAllIdxDaysData()
 
-        # 需要下载数据
+        # 需要按日期补充下载数据
         if bn:
             #根据上次最后更新日期，开始FetchDayData
-            #根据现在时间，看是否下午16点之前还是之后，生成2个日期差的交易日列表，FetchDayData这些交易日
+            #根据现在时间，看是否下午18点之前还是之后，生成2个日期差的交易日列表，FetchDayData这些交易日
             count = (today.date()-lastDate.date()).days
             while count > 0:
-                self.FetchDayData( (today-datetime.timedelta(days=count-1)).strftime('%Y%m%d') )
+                theDate = (today-datetime.timedelta(days=count-1)).strftime('%Y%m%d')
+                self.FetchDayData(theDate)
+                self.FetchIdxDaysDate(theDate)
                 count = count-1
 
         #下载完成后，更新config表
@@ -112,17 +112,10 @@ class Data():
         init.getConn().commit()
         cur.close()
 
-    #根据表名判断表是否存在
-    def IsTableExist(self,name):
-        for a in self.allExistTables:
-            if a.find(name)!=-1 :
-                return True
-        return False
-
     #获取股票tick的历史日线数据,beg不填写的话为第一天上市的日期（%Y%m%d格式），end不填写的话为最新日期
     def FetchHistoryDayData(self,ticker,beg=None,end=None,st=init.ts.Market()):
         if beg==None:
-            beg = '19891212'#time.strftime('%Y%m%d', time.strptime(a[10], '%Y-%m-%d')) #因为1989还没有A股
+            beg = '19901010'#time.strftime('%Y%m%d', time.strptime(a[10], '%Y-%m-%d')) #因为1989还没有A股
         if end==None:
             end = time.strftime('%Y%m%d', time.localtime())
         print '查询%s从%s到%s的数据' % (ticker, beg, end)
@@ -137,7 +130,7 @@ class Data():
                 nLoop = nLoop + 1
                 sleep(random.uniform(0.5, 1))
             else:  # 获取成功，保存到数据库中
-                tableName = ('MktEqud%s' % ticker)
+                tableName = '%s%s' % (init.g_mktequd,ticker)
                 df.to_sql(tableName, init.getEngine(), if_exists='append')
                 self.AddPrimaryKey(init.getCursor(), tableName)
                 return True
@@ -148,21 +141,9 @@ class Data():
 
     #获取所有股票的历史日线数据
     def FetchAllHistoryDayData(self):
-        st = init.ts.Market()
-        df = None
-        n = 1
         for a in self.remainAll:
             tick = ('%06d' % a[1])
-            if self.FetchHistoryDayData(tick) :
-                n = n+1
-            if n % 50 == 0:
-                sleep(random.uniform(1, 1.5))
-
-    # 2016-3-21 17:59:12
-    #获取今日行情数据
-    def FetchTodayDayData(self):
-        todayStr = util.getTodayYYmmddStr()
-        self.FetchDayData(todayStr)
+            self.FetchHistoryDayData(tick)
 
     #获取指定日期的日行情数据，并把数据更新到各张表中
     def FetchDayData(self,dateStr):
@@ -171,26 +152,20 @@ class Data():
         bGetData = df.shape[0]>0
         if bGetData:
             print '成功获取%s的日行情数据' % dateStr
-            # df.to_sql( ('%smktequd' % dateStr), init.g_engine, if_exists='replace')
         else:
             print '未获取到%s的日行情数据' % dateStr
         #将今日行情数据插入到各张表中
         if bGetData:
             self.UpdateDaysData(dateStr,df)
 
-    #更新日行情数据
+    #更新指定日行情数据到各张表中
     def UpdateDaysData(self,tradeDate,df):
-        theDate = ('%smktequd' % tradeDate)
-        print df.shape
         cur = init.getCursor()
-        conn = init.getConn()
-
         for i in range(0,df.shape[0]):    #(df.shape[0]):
             dd = df.iloc[i] #获取一行
-            tableName = 'mktequd%06d' % dd[1]
+            tableName = '%s%06d' % (init.g_mktequd,dd[1])
             #判断表是否存在
-            bExist = self.IsTableExist(tableName)
-            if bExist==True :
+            if tableName in self.allExistTables:
                 try:
                     n = cur.execute('select `index` from %s' % tableName)   #获取index值   dd[3].decode('utf-8')
                     insertSql = 'INSERT INTO %s (`index`, secID, ticker, secShortName, exchangeCD, tradeDate, preClosePrice, actPreClosePrice, openPrice, highestPrice, lowestPrice, closePrice, turnoverVol, turnoverValue, dealAmount, turnoverRate, accumAdjFactor, negMarketValue, marketValue, PE, PE1, PB, isOpen) VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\')' % (tableName,n,dd[0],dd[1],dd[2],dd[3],dd[4],dd[5],dd[6],dd[7],dd[8],dd[9],dd[10],dd[11],dd[12],dd[13],dd[14],dd[15],dd[16],dd[17],dd[18],dd[19],dd[20],dd[21])
@@ -198,8 +173,42 @@ class Data():
                     cur.execute(insertSql)
                 except init.MySQLdb.Error,e:
                     print "Mysql Error %d: %s" % (e.args[0], e.args[1])
-        conn.commit()
+        init.getConn().commit()
         cur.close()
+
+    # 获取指数日行情
+    def FetchAllIdxDaysData(self):
+        st = init.ts.Market()
+        df = pd.read_sql( init.g_select_idx, init.g_conn)   #指数基本列表
+        for i in range(0,df.shape[0]):
+            dd = df.iloc[i]
+            idxTableName = ('%s%s' % (init.g_mktidxd,dd['ticker']))
+            # 该指数表不存在才需要完全下载
+            if (idxTableName in self.allExistTables) == False:
+                try:
+                    dm = st.MktIdxd(ticker=dd['ticker'])
+                    dm.to_sql( idxTableName,init.getEngine(),if_exists='replace' )
+                    print '获取到%s' % idxTableName
+                    sleep(0.5)
+                except BaseException,e:
+                    print "Error %s" % e
+
+    # 获取指定日期的指数日行情
+    def FetchIdxDaysDate(self,dateStr):
+        st = init.ts.Market()
+        df = st.MktIdxd(tradeDate = dateStr)
+        bGetData = df.shape[0]>0
+        if bGetData:
+            print '成功获取%s的指数日行情数据' % dateStr
+        else:
+            print '未获取到%s的指数日行情数据' % dateStr
+        #将指数日行情数据插入到各张表中
+        if bGetData:
+            self.UpdateIdxDaysData(dateStr,df)
+
+    # 根据下载的指数日线数据，插入到各张表
+    def UpdateIdxDaysData(self,dateStr,df):
+        pass
 
     #更改所有股票日行情表的，设置日期主键
 # ALTER TABLE `mktequd000001`
@@ -238,7 +247,7 @@ class Data():
             dd = df.iloc[i]
             if dd['percent_1day']==None :
                 # 根据时间和id计算涨幅
-                tableName = ('mktequd%s' % dd['tuijian_stock_id'])
+                tableName = ('%s%s' % (init.g_mktequd,dd['tuijian_stock_id']))
                 sql = 'select * from %s where tradeDate=\'%s\'' %(tableName,time.strftime('%Y-%m-%d', time.strptime(dd['tuijian_time'], '%Y%m%d')))
                 print sql
                 n=cur.execute(sql)
@@ -273,11 +282,28 @@ class Data():
         bb = list()
         kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
         for k in kk:
-            tableName = ('mktequd%06d' % k)
+            tableName = '%s%06d' % (init.g_mktequd,k)
             bFind = tableName in self.allExistTables
             if bFind==False:
                 bb.append(tableName)
         print bb
+
+    # tes
+    def test2(self):
+        st = init.ts.Market()
+
+        today = datetime.datetime.now()
+        if today.hour<init.g_fetch_time :
+            today = today - datetime.timedelta(hours=24)
+        for i in range(0,30):
+            today = today - datetime.timedelta(hours=24)
+            try:
+                df = st.MktIdxd(tradeDate=today.strftime('%Y%m%d'))
+            except e:
+                print "Error %d: %s" % (e.args[0], e.args[1])
+            sleep(0.5)
+            print i
+
 
 ########################################################################
 
@@ -286,11 +312,12 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
+    # data.test2()
+
     # data.FetchDayData('20160314')
     # data.FetchDayData('20160315')
 
     # data.FetchAllHistoryDayData()
-    # data.FetchTodayDayData()
     # data.UpdateDaysData(util.getTodayYYmmddStr())
 
     # data.CountTuijianStockData()
@@ -300,14 +327,17 @@ if __name__ == '__main__':
     # data.FetchAllHistoryDayData()
     # data.FetchDayData('20160311')
     # data.UpdateDaysData('20160311')
-    data.test()
-    data.test1()
+    # data.test()
+    # data.test1()
     # data.AddPrimaryKeyForDaysData()
 
     # 日行情的处理流程：
     # 1，重新更新datayest_equ
     # 2. FetchAllHistoryDayData会会新股票创建出新表mktequdXXXXXX，并会调用AddPrimaryKey处理好表结构
-    # 3. FetchTodayDayData获取到今日行情，并调用UpdateDaysData更新今日行情到各张mktequdXXXXXX中
+    # 3. FetchDayData获取到今日行情，并调用UpdateDaysData更新今日行情到各张mktequdXXXXXX中
+
+######################################################################################################################
+
 
 #新浪财经
 # 保存全部股票基本信息

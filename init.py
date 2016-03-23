@@ -13,6 +13,10 @@ g_dropSql = 'drop table if exists %s'
 g_selectSql = 'select * from %s'
 g_selct_datayest_equSql = 'SELECT  secID,ticker,exchangeCD,ListSectorCD,ListSector,transCurrCD,secShortName,secFullName,listStatusCD,listDate,delistDate,equTypeCD,equType,exCountryCD,partyID,totalShares,nonrestFloatShares,nonrestfloatA,officeAddr,primeOperating,endDate,TShEquity FROM datayest_equ'
 g_select_datayest_mktadjf = 'SELECT secID,ticker,exchangeCD,secShortName,secShortNameEn,exDivDate,perCashDiv,perShareDivRatio,perShareTransRatio,allotmentRatio,allotmentPrice,adjFactor,accumAdjFactor,endDate FROM datayest_mktadjf'
+g_select_idx = 'select * from _idx_'
+g_fetch_time = 18
+g_mktidxd = 'mktidxd'
+g_mktequd = 'mktequd'
 
 def initDb():
     global g_engine
