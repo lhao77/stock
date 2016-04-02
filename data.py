@@ -14,6 +14,7 @@ import pandas as pd
 class Data():
     def __init__(self):
         self.allStocksBasicInfo = None  #所有的股票基本信息，从datayest_equ中查取的
+        self.allFundBasicInfo = None    #所有基金基本信息
         self.allExistTables = set([])    #所有已经存在的表信息
         self.remainAll = set([])    #剩余待查取的股票代码list
         self.fails = set([]) #下载失败的股票ticker
@@ -27,6 +28,10 @@ class Data():
         df = eq.Equ(equTypeCD='A', listStatusCD='L', field='')
         df.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
         self.allStocksBasicInfo = df
+
+    # 获取全部基金基本信息
+    def FetchAllFundBasicInfo(self):
+        print '开始FetchAllFundBasicInfo'
 
     # 获取所有股票的前复权因子
     def FetchAllStockQfqFactor(self):
@@ -46,6 +51,7 @@ class Data():
             stocks = pd.np.array( (self.allStocksBasicInfo)[idx:idx+maxids] )
             str_ticker = ','.join( ('%06d' % a[1]) for a in stocks )
             idx = idx+maxids
+            print 'FetchAllStockQfqFactor %s' % str_ticker
             df = st.MktAdjf(ticker=str_ticker)
             df.to_sql(init.g_datayest_mktadjf.lower(),init.getEngine(),if_exists='append',index=False)
         self.qfqFactor = df
@@ -67,6 +73,7 @@ class Data():
         if bn:
             self.FetchAllStocksBasicInfo()
             self.FetchAllStockQfqFactor()
+            self.FetchAllFundBasicInfo()
 
         # 初始化股票基本信息表
         if self.allStocksBasicInfo is None :
@@ -263,6 +270,41 @@ class Data():
         conn.commit()
         cur.close()
 
+    #得到股票价格（不复权）
+    def GetPrice(self,ticker,_time,bForward=True):
+        count = 0
+        price = -1
+        qfq = 1
+        while _time.date()<=datetime.datetime.now().date():
+            # 向前or向后追溯
+            ntime = _time+datetime.timedelta(days=count) if bForward else datetime.datetime.now()-datetime.timedelta(days=count)
+            df = pd.read_sql('select openPrice from %s%s where tradeDate=\'%s\'' % (init.g_mktequd,'%06d' % ticker, ntime.strftime('%Y-%m-%d')),init.getConn())
+            if df.shape[0]==1:
+                price = df.iloc[0]['openPrice']
+                qfq = self.GetQfq(ticker,ntime)
+                break
+            else:
+                count = count+1
+        return  price
+
+    #获取前复权因子
+    def GetQfq(self,ticker,_time=datetime.datetime.now()):
+        # 根据时间获取前复权因子
+        qfq = 1 #前复权因子
+        df = self.qfqFactor.query('ticker==%s' % ticker)
+        for i in range(0,df.shape[0]):
+            dd = df.iloc[i]
+            time_ex = datetime.datetime.strptime(dd['exDivDate'], "%Y-%m-%d")
+            time_end = datetime.datetime.strptime(dd['endDate'], "%Y-%m-%d")
+            if _time.date()>=time_end.date() and _time.date()<=time_ex.date():
+                qfq = dd['adjFactor']
+                break
+        return qfq
+
+    # 计算前复权价格
+    def CalcQfqPrice(self,ticker,_time):
+        return self.GetPrice(ticker,_time)*self.GetQfq(ticker,_time)
+
     #Test 找出存在的表，但是在datayest_equ中不存在
     def test(self):
         bb = list()
@@ -347,6 +389,34 @@ class Data():
         #             print "Mysql Error %d: %s" % (e.args[0], e.args[1])
         init.getConn().commit()
 
+    # 测试函数
+    def test4(self):
+        # st = init.ts.Market()
+        # df = st.TickRTSnapshot(securityID='000001.XSHG')  #没有权限   2016-4-1 19:18:21
+        # nowDf = init.ts.get_today_all()
+        # nowDf.to_sql('_today_all',getEngine(),if_exists='replace',index=False)
+        nowDf = pd.read_sql('select * from _today_all',init.getConn())
+        #遍历表中的股票id，找出实时数据：今天涨幅，累计涨幅，实时价格
+        df = pd.read_sql( ('select * from %s' % init.g_tuijian_stock_v16_ziming), init.getConn())
+        df['accumPercent'] = pd.Series(None,index=df.index)
+        df['todayPercent'] = pd.Series(None,index=df.index)
+        for i in range(0,df.shape[0]):
+            dd = df.iloc[i]
+            #计算推荐时价格（前复权）
+            tuijian_price = self.CalcQfqPrice(int(dd['tuijian_stock_id']),datetime.datetime.strptime(dd['tuijian_time'], "%Y%m%d"))
+            #查取现在实时价格。
+            nowPrice = -1
+            nowPriceDf = nowDf[nowDf.code==dd['tuijian_stock_id']]
+            if nowPriceDf.shape[0]==1:
+                nowPrice = nowPriceDf['trade']*self.GetQfq(dd['tuijian_stock_id'])
+                df.at[i,'todayPercent'] = nowPriceDf['changepercent']   #得到今天涨幅
+            else:   #没查到，说明今天停牌了
+                dt = pd.read_sql((init.g_select_actPreClosePrice % dd['tuijian_stock_id']), init.getConn())
+                nowPrice = dt.iloc[0]['actPreClosePrice']*self.GetQfq(dd['tuijian_stock_id'])   #需要判断dt不存在的情况吗？实际上不存在dt为空
+
+            #得到累计涨幅和今天涨幅
+            df.at[i,'accumPercent'] = (nowPrice-tuijian_price)/tuijian_price*100
+        print df
 
 ########################################################################
 
@@ -357,6 +427,7 @@ if __name__ == '__main__':
 
     # data.test2()
     # data.test3()
+    data.test4()
 
     # data.FetchDayData('20160314')
     # data.FetchDayData('20160315')

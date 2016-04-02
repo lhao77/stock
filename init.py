@@ -75,6 +75,9 @@ VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', 
 g_insert_table_mktidxd = 'INSERT INTO `%s` VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', %s, %s, \
  %s, %s, %s, %s, %s, %s, %s)'
 
+g_tuijian_stock_v16_ziming = '_tuijian_stock_v16_ziming'
+g_select_actPreClosePrice = 'SELECT actPreClosePrice FROM `mktequd%s` ORDER BY `tradeDate` DESC LIMIT 0, 2'
+
 def initDb():
     global g_engine
     global g_conn

@@ -17,7 +17,7 @@ def datetime_toString(dt):
 
 #把字符串转成datetime
 def string_toDatetime(string):
-    return datetime.strptime(string, "%Y-%m-%d-%H")
+    return datetime.datetime.strptime(string, "%Y-%m-%d-%H")
 
 #把字符串转成时间戳形式
 def string_toTimestamp(strTime):
