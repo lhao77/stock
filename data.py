@@ -1,5 +1,5 @@
-#-*- coding: utf-8 -*-，
-#coding = utf-8
+#-*- coding: utf-8 -*-
+
 import init
 import util
 import numexpr
@@ -8,6 +8,7 @@ import datetime
 from time import sleep
 import random
 import pandas as pd
+import stock_exception
 
 # ##############################################################
 #数据类
@@ -270,40 +271,58 @@ class Data():
         conn.commit()
         cur.close()
 
-    #得到股票价格（不复权）
-    def GetPrice(self,ticker,_time,bForward=True):
-        count = 0
-        price = -1
-        qfq = 1
-        while _time.date()<=datetime.datetime.now().date():
-            # 向前or向后追溯
-            ntime = _time+datetime.timedelta(days=count) if bForward else datetime.datetime.now()-datetime.timedelta(days=count)
-            df = pd.read_sql('select openPrice from %s%s where tradeDate=\'%s\'' % (init.g_mktequd,'%06d' % ticker, ntime.strftime('%Y-%m-%d')),init.getConn())
+
+    #得到股票价格autoType 0不复权，1前复权，2后复权
+    def GetPrice(self,ticker,_time=datetime.datetime.now(),bForward=True,autoType=1):
+        if bForward:
+            str = init.g_select_price_mktequd_asc % ('%06d' % ticker,_time.strftime('%Y-%m-%d'))
+            df = pd.read_sql(str,init.getConn())
             if df.shape[0]==1:
-                price = df.iloc[0]['openPrice']
-                qfq = self.GetQfq(ticker,ntime)
-                break
+                openPrice = df.iloc[0]['openPrice']
+                accumAdjFactor = df.iloc[0]['accumAdjFactor']
+                return openPrice*accumAdjFactor if autoType==1 else openPrice
             else:
-                count = count+1
-        return  price
+                raise stock_exception.DataException('Error in GetPrice','%s;Have:%s' % (str,df.shape[0]))
+        else:
+            str = init.g_select_price_mktequd_desc % ('%06d % ticker',_time)
+            df = pd.read_sql(str,init.getConn())
+            if df.shape[0]==1:
+                closePrice = df.iloc[0]['closePrice']
+                accumAdjFactor = df.iloc[0]['accumAdjFactor']
+                return closePrice*accumAdjFactor if autoType==1 else closePrice
+            else:
+                raise stock_exception.DataException('Error in GetPrice','%s;Have:%s' % (str,df.shape[0]))
+
+    # #得到股票价格（不复权）。。。不考虑盘中交易，bForward Trude表示向前计算（比如20160101不是交易日，那么算到20160104），autoType 0不复权，1前复权，2后复权
+    # def GetPrice(self,ticker,_time,bForward=True,autoType=1):
+    #     count = 0
+    #     price = -1
+    #     qfq = 1
+    #     while _time.date()<=datetime.datetime.now().date():
+    #         # 向前or向后追溯
+    #         ntime = _time+datetime.timedelta(days=count) if bForward else datetime.datetime.now()-datetime.timedelta(days=count)
+    #         df = pd.read_sql('select openPrice from %s%s where tradeDate=\'%s\'' % (init.g_mktequd,'%06d' % ticker, ntime.strftime('%Y-%m-%d')),init.getConn())
+    #         if df.shape[0]==1:
+    #             price = df.iloc[0]['openPrice']
+    #             qfq = self.GetQfq(ticker,ntime)
+    #             break
+    #         else:
+    #             count = count+1
+    #     if autoType==0:
+    #         return price
+    #     else:
+    #         return price*qfq
 
     #获取前复权因子
     def GetQfq(self,ticker,_time=datetime.datetime.now()):
         # 根据时间获取前复权因子
         qfq = 1 #前复权因子
-        df = self.qfqFactor.query('ticker==%s' % ticker)
-        for i in range(0,df.shape[0]):
-            dd = df.iloc[i]
-            time_ex = datetime.datetime.strptime(dd['exDivDate'], "%Y-%m-%d")
-            time_end = datetime.datetime.strptime(dd['endDate'], "%Y-%m-%d")
-            if _time.date()>=time_end.date() and _time.date()<=time_ex.date():
-                qfq = dd['adjFactor']
-                break
+        str = 'ticker==%s & exDivDate>=\'%s\'>=endDate' % (ticker,_time.strftime("%Y-%m-%d"))
+        print str
+        df = self.qfqFactor.query(str)
+        if df.shape[0]==1:
+            qfq = df.iloc[0]['adjFactor']
         return qfq
-
-    # 计算前复权价格
-    def CalcQfqPrice(self,ticker,_time):
-        return self.GetPrice(ticker,_time)*self.GetQfq(ticker,_time)
 
     #Test 找出存在的表，但是在datayest_equ中不存在
     def test(self):
@@ -390,7 +409,7 @@ class Data():
         init.getConn().commit()
 
     # 测试函数
-    def test4(self):
+    def CountTuijianZiming(self):
         # st = init.ts.Market()
         # df = st.TickRTSnapshot(securityID='000001.XSHG')  #没有权限   2016-4-1 19:18:21
         # nowDf = init.ts.get_today_all()
@@ -403,19 +422,23 @@ class Data():
         for i in range(0,df.shape[0]):
             dd = df.iloc[i]
             #计算推荐时价格（前复权）
-            tuijian_price = self.CalcQfqPrice(int(dd['tuijian_stock_id']),datetime.datetime.strptime(dd['tuijian_time'], "%Y%m%d"))
-            #查取现在实时价格。
-            nowPrice = -1
-            nowPriceDf = nowDf[nowDf.code==dd['tuijian_stock_id']]
-            if nowPriceDf.shape[0]==1:
-                nowPrice = nowPriceDf['trade']*self.GetQfq(dd['tuijian_stock_id'])
-                df.at[i,'todayPercent'] = nowPriceDf['changepercent']   #得到今天涨幅
-            else:   #没查到，说明今天停牌了
-                dt = pd.read_sql((init.g_select_actPreClosePrice % dd['tuijian_stock_id']), init.getConn())
-                nowPrice = dt.iloc[0]['actPreClosePrice']*self.GetQfq(dd['tuijian_stock_id'])   #需要判断dt不存在的情况吗？实际上不存在dt为空
-
-            #得到累计涨幅和今天涨幅
-            df.at[i,'accumPercent'] = (nowPrice-tuijian_price)/tuijian_price*100
+            try:
+                tuijian_price = self.GetPrice(int(dd['tuijian_stock_id']),datetime.datetime.strptime(dd['tuijian_time'], "%Y%m%d"))
+                #查取现在实时价格。
+                nowPrice = -1
+                nowPriceDf = nowDf[nowDf.code==dd['tuijian_stock_id']]
+                if nowPriceDf.shape[0]==1:
+                    nowPrice = nowPriceDf['trade']*self.GetQfq(dd['tuijian_stock_id'])
+                    df.at[i,'todayPercent'] = nowPriceDf['changepercent']   #得到今天涨幅
+                    df.at[i,'accumPercent'] = (nowPrice-tuijian_price)/tuijian_price*100    #得到累计涨幅
+                else:   #没查到，说明今天停牌了，向前查找一个最近的日期
+                    try:
+                        nowPrice = self.GetPrice(int(dd['tuijian_stock_id']),bForward=False)
+                        df.at[i,'accumPercent'] = (nowPrice-tuijian_price)/tuijian_price*100    #得到累计涨幅
+                    except stock_exception.DataException,e:
+                        print "Error %s: %s" % (e.expression, e.message)
+            except stock_exception.DataException,e:
+                print "Error %s: %s" % (e.expression, e.message)
         print df
 
 ########################################################################
@@ -427,7 +450,7 @@ if __name__ == '__main__':
 
     # data.test2()
     # data.test3()
-    data.test4()
+    # data.CountTuijianZiming()
 
     # data.FetchDayData('20160314')
     # data.FetchDayData('20160315')

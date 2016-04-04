@@ -1,5 +1,4 @@
-#-*- coding: utf-8 -*-，
-#coding = utf-8
+#-*- coding: utf-8 -*-
 __author__ = 'lhao'
 
 import tushare as ts
@@ -77,6 +76,8 @@ g_insert_table_mktidxd = 'INSERT INTO `%s` VALUES (\'%s\', \'%s\', \'%s\', \'%s\
 
 g_tuijian_stock_v16_ziming = '_tuijian_stock_v16_ziming'
 g_select_actPreClosePrice = 'SELECT actPreClosePrice FROM `mktequd%s` ORDER BY `tradeDate` DESC LIMIT 0, 2'
+g_select_price_mktequd_asc = 'SELECT tradeDate,ticker,closePrice,openPrice,accumAdjFactor FROM mktequd%s WHERE tradeDate >= \'%s\' ORDER BY tradeDate ASC LIMIT 0, 1'
+g_select_price_mktequd_desc = 'SELECT tradeDate,ticker,closePrice,openPrice,accumAdjFactor FROM mktequd%s WHERE tradeDate <= \'%s\' ORDER BY tradeDate DESC LIMIT 0, 1'
 
 def initDb():
     global g_engine
