@@ -59,24 +59,44 @@ class Data():
             df.to_sql(init.g_datayest_mktadjf.lower(),init.getEngine(),if_exists='append',index=False)
         self.qfqFactor = df
 
+    #删除除权的表，根据exDivDate删除旧表
+    def DropExDivDate(self,lastFetchDateStr):
+        df = pd.DataFrame()
+        dt = datetime.datetime.strptime(lastFetchDateStr,"%Y%m%d")
+        dt = dt + datetime.timedelta(days=1)
+        now = datetime.datetime.now()
+        while dt.date()<=now.date():
+            st = init.ts.Market()
+            dateStr = dt.strftime("%Y%m%d")
+            ddf = st.MktAdjf(exDivDate=dateStr)
+            print '%s:%s' % (dateStr,ddf.shape[0])
+            if ddf.shape[0]>0:
+                df = df.append(ddf,ignore_index=True)
+            dt = dt + datetime.timedelta(days=1)
+        # 删除除权的表
+        cur = init.getCursor()
+        for i in range(0,df.shape[0]):
+            tn = '%s%06d' % (init.g_mktequd,df.iloc[i]['ticker'])
+            cur.execute(init.g_dropSql % tn)
+            print tn
+        init.getConn().commit()
+        cur.close()
+
     #初始化数据
     def InitData(self):
         # 初始化config
         df = pd.read_sql( init.g_selectSql % '_config', init.g_conn)
         if df.shape[0]==1:
             self._config = df.iloc[0]
-
-        #如果今天还没有更新过了，才FetchBasic
-        bn = False  #是否需要下载数据
         lastDate = datetime.datetime.strptime(self._config['last_daysdata_update_date'], '%Y%m%d')
-        today = datetime.datetime.now()
-        if today.hour<init.g_fetch_time :
-            today = today - datetime.timedelta(days=1)
-        bn = lastDate.date()<today.date()
-        if bn:
-            self.FetchAllStocksBasicInfo()
-            # self.FetchAllStockQfqFactor()
-            self.FetchAllFundBasicInfo()
+
+        # 下载基本数据
+        self.FetchAllStocksBasicInfo()
+        # self.FetchAllStockQfqFactor()
+        self.FetchAllFundBasicInfo()
+
+        #删除除权的表
+        self.DropExDivDate(self._config['last_daysdata_update_date'])
 
         # 初始化股票基本信息表
         if self.allStocksBasicInfo is None :
@@ -104,7 +124,10 @@ class Data():
         self.FetchAllIdxDaysData()
 
         # 需要按日期补充下载数据
-        if bn:
+        today = datetime.datetime.now()
+        if today.hour<init.g_fetch_time :
+            today = today - datetime.timedelta(days=1)
+        if lastDate.date()<today.date():#是否需要下载数据
             #根据上次最后更新日期，开始FetchDayData
             #根据现在时间，看是否下午18点之前还是之后，生成2个日期差的交易日列表，FetchDayData这些交易日
             count = (today.date()-lastDate.date()).days
@@ -133,7 +156,7 @@ class Data():
         bGetData = False
         nLoop = 0
 
-        # 创建表
+        # 创建表mktequdXXXXXX
         tableName = '%s%s' % (init.g_mktequd,ticker)
         sql = init.g_create_table_mktequd % tableName
         init.getCursor().execute(sql)
@@ -320,13 +343,11 @@ class Data():
 
     #获取前复权因子
     def GetQfq(self,ticker,_time=datetime.datetime.now()):
-        # 根据时间获取前复权因子
-        qfq = 1 #前复权因子
-        str = 'ticker==%s & exDivDate>=\'%s\'>=endDate' % (int(ticker),_time.strftime("%Y-%m-%d"))
-        print str
-        df = self.qfqFactor.query(str)
+        str = init.g_select_price_mktequd_desc % ('%06d' % ticker,_time.strftime("%Y-%m-%d"))
+        df = pd.read_sql(str,init.getConn())
+        qfq = 1
         if df.shape[0]==1:
-            qfq = df.iloc[0]['adjFactor']
+            qfq = df.iloc[0]['accumAdjFactor']
         return qfq
 
     #Test 找出存在的表，但是在datayest_equ中不存在
@@ -436,6 +457,7 @@ class Data():
             print tn
         init.getConn().commit()
         cur.close()
+
     # 测试函数
     def CountTuijianZiming(self):
         # st = init.ts.Market()
@@ -479,15 +501,23 @@ class Data():
 
         print df
 
-    # 统计最近N天指数的涨幅
+    # 统计某个区间内股票的涨幅
+    def CountChangePercent(self,startDate,endDate):
+        # 因为通联数据库表的数据原因（如果改天停牌，openPrice为0，所以把起始时间提前一天去closePrice）
+        ddf = self.idxd000001.query('tradeDate<=\'%s\'' % startDate.strftime("%Y-%m-%d"))
+        if ddf.shape[0]==0:
+            print '起始日期有错误'
+            return
+        preStartDate = datetime.datetime.strptime(ddf.iloc[-1]['tradeDate'], "%Y-%m-%d")    #上一个交易日日期，用于获取前复权数据
+        ddf = self.idxd000001.query('\'%s\'<=tradeDate<=\'%s\'' % (startDate.strftime("%Y-%m-%d"),endDate.strftime("%Y-%m-%d")))
+        n = ddf.shape[0]    # 共有n个交易日
+        if n==0:
+            print '没有交易日'
+            return
+        # 转换成实际上的其实交易日日期
+        trueStartDate = datetime.datetime.strptime(ddf.iloc[0]['tradeDate'], "%Y-%m-%d")
+        trueEndDate = datetime.datetime.strptime(ddf.iloc[n-1]['tradeDate'], "%Y-%m-%d")
 
-    # 统计最近N天股票的涨幅。
-    def CountChangePercentN(self,n):
-        #计算出N天前的交易日日期
-        ddf = self.idxd000001.sort_values(by='tradeDate',ascending=False)
-        nDate = ddf.iloc[n-1]['tradeDate']
-
-        # df_CountChangePercentN = pd.read_sql("select * from _CountChangePercent%d" % n, init.getConn())
         df_CountChangePercentN = pd.DataFrame()
         df_CountChangePercentN['ticker'] = pd.Series(dtype=numpy.int64,index=df_CountChangePercentN.index)
         df_CountChangePercentN['secShortName'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
@@ -503,22 +533,32 @@ class Data():
                 #     break
                 # count = count+1
                 df_CountChangePercentN.at[i,'ticker'] = stock['ticker']
-                df_CountChangePercentN.at[i,'secShortName'] = stock['secShortName'].encode('utf8')
+                df_CountChangePercentN.at[i,'secShortName'] = stock['secShortName']
 
-                str = 'select * from %s where tradeDate>=\'%s\' order by tradeDate limit 0,%d' % (stock_mktequd_name,nDate,n+1)
+                str = 'select * from %s where tradeDate>=\'%s\' and tradeDate<=\'%s\' order by tradeDate' % (stock_mktequd_name,trueStartDate.strftime("%Y-%m-%d"),trueEndDate.strftime("%Y-%m-%d"))
                 df = pd.read_sql(str,init.getConn())
                 nn = df.shape[0]
                 if nn>0:
                     # 考虑到新股没有N个交易日的情况，已经覆盖了停牌的情况
-                    startPrice = df.iloc[0]['closePrice']*df.iloc[0]['accumAdjFactor'] if nn>=n+1 else df.iloc[0]['openPrice']*df.iloc[0]['accumAdjFactor']
+                    startPrice = df.iloc[0]['preClosePrice']*self.GetQfq(stock['ticker'],preStartDate)  # if nn>=n else df.iloc[0]['preClosePrice']*1
                     endPrice = df.iloc[nn-1]['closePrice']*df.iloc[nn-1]['accumAdjFactor']
-                    percent = (endPrice-startPrice)/startPrice*100 if startPrice!=0 else -100
+                    percent = (endPrice-startPrice)/startPrice*100 # if startPrice!=0 else -100
                     df_CountChangePercentN['startDate'] = df.iloc[0]['tradeDate']
                     df_CountChangePercentN['endDate'] = df.iloc[nn-1]['tradeDate']
                     df_CountChangePercentN.at[i,'percent'] = percent
-        # df_CountChangePercentN.to_csv('xxxx.xls')
-        df_CountChangePercentN.to_sql( ('_countchangepercent%d' % n), init.getEngine(), if_exists='replace',index=False)
+        # 存储到数据库
+        df_CountChangePercentN.to_sql( ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d"))), init.getEngine(), if_exists='replace',index=False)
 
+    # 统计最近N天股票的涨幅。
+    def CountChangePercentN(self,n):
+        #计算出N天前的交易日日期
+        ddf = self.idxd000001.sort_values(by='tradeDate',ascending=False)
+        nn = n-1 if ddf.shape[0]>n else -1
+        startDate = datetime.datetime.strptime(ddf.iloc[nn]['tradeDate'], "%Y-%m-%d")
+        endDate = datetime.datetime.strptime(ddf.iloc[0]['tradeDate'], "%Y-%m-%d")
+        self.CountChangePercent(startDate,endDate)
+
+    # 获取股票的流通盘，市值，。。。
 ########################################################################
 
 if __name__ == '__main__':
@@ -528,10 +568,10 @@ if __name__ == '__main__':
 
     # data.test2()
     # data.test3()
-    # data.test4()
 
     # data.CountTuijianZiming()
     # data.CountChangePercentN(10)
+    # data.CountChangePercent(datetime.datetime.strptime('20150905', "%Y%m%d"),datetime.datetime.strptime('20151005', "%Y%m%d"))
 
     # data.FetchDayData('20160314')
     # data.FetchDayData('20160315')
