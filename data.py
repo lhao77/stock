@@ -5,6 +5,7 @@ import util
 import numexpr
 import time
 import datetime
+import calendar
 from time import sleep
 import random
 import pandas as pd
@@ -69,7 +70,7 @@ class Data():
             st = init.ts.Market()
             dateStr = dt.strftime("%Y%m%d")
             ddf = st.MktAdjf(exDivDate=dateStr)
-            print '%s:%s' % (dateStr,ddf.shape[0])
+            print 'DropExDivDate  %s:%s' % (dateStr,ddf.shape[0])
             if ddf.shape[0]>0:
                 df = df.append(ddf,ignore_index=True)
             dt = dt + datetime.timedelta(days=1)
@@ -458,6 +459,10 @@ class Data():
         init.getConn().commit()
         cur.close()
 
+    # 获取股票的流通盘，市值，。。。
+    def GetStockLiutongpanInfo(self):
+        self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==1]['nonrestFloatShares']     #   totalShares  nonrestfloatA  listDate
+
     # 测试函数
     def CountTuijianZiming(self):
         # st = init.ts.Market()
@@ -499,7 +504,7 @@ class Data():
             except stock_exception.DataException,e:
                 print "Error %s: %s" % (e.expression, e.message)
 
-        print df
+        df.to_sql('_dav_tongji',init.getEngine(), if_exists='replace',index=False)
 
     # 统计某个区间内股票的涨幅
     def CountChangePercent(self,startDate,endDate):
@@ -527,9 +532,10 @@ class Data():
         df_CountChangePercentN['startDate'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
         df_CountChangePercentN['endDate'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
         count =0
-        for i in range(0,self.allStocksBasicInfo.shape[0]):
-            stock = self.allStocksBasicInfo.iloc[i]
-            stock_mktequd_name = '%s%06d' % (init.g_mktequd,stock['ticker'])
+        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
+        i=0
+        for ticker,secShortName in kk.iteritems():
+            stock_mktequd_name = '%s%06d' % (init.g_mktequd,ticker)
             if stock_mktequd_name in self.allExistTables:
                 # if count ==10:
                 #     break
@@ -537,15 +543,15 @@ class Data():
                 if count%100==0:
                     print 'CountChangePercent:%s' % count
                 count = count+1
-                df_CountChangePercentN.at[i,'ticker'] = stock['ticker']
-                df_CountChangePercentN.at[i,'secShortName'] = stock['secShortName']
+                df_CountChangePercentN.at[i,'ticker'] = ticker
+                df_CountChangePercentN.at[i,'secShortName'] = secShortName
 
                 str = 'select * from %s where tradeDate>=\'%s\' and tradeDate<=\'%s\' order by tradeDate' % (stock_mktequd_name,trueStartDate.strftime("%Y-%m-%d"),trueEndDate.strftime("%Y-%m-%d"))
                 df = pd.read_sql(str,init.getConn())
                 nn = df.shape[0]
                 if nn>0:
                     # 考虑到新股没有N个交易日的情况，已经覆盖了停牌的情况
-                    startPrice = df.iloc[0]['preClosePrice']*self.GetQfq(stock['ticker'],preStartDate)  # if nn>=n else df.iloc[0]['preClosePrice']*1
+                    startPrice = df.iloc[0]['preClosePrice']*self.GetQfq(ticker,preStartDate)  # if nn>=n else df.iloc[0]['preClosePrice']*1
                     endPrice = df.iloc[nn-1]['closePrice']*df.iloc[nn-1]['accumAdjFactor']
                     percent = (endPrice-startPrice)/startPrice*100 # if startPrice!=0 else -100
                     df_CountChangePercentN.at[i,'startDate'] = df.iloc[0]['tradeDate']
@@ -553,6 +559,7 @@ class Data():
                     df_CountChangePercentN.at[i,'percent'] = percent
                     df_CountChangePercentN.at[i,'startPrice'] = startPrice
                     df_CountChangePercentN.at[i,'endPrice'] = endPrice
+            i = i+1
         # 存储到数据库
         df_CountChangePercentN.to_sql( ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d"))), init.getEngine(), if_exists='replace',index=False)
 
@@ -565,14 +572,12 @@ class Data():
         endDate = datetime.datetime.strptime(ddf.iloc[0]['tradeDate'], "%Y-%m-%d")
         self.CountChangePercent(startDate,endDate)
 
-    # 获取股票的流通盘，市值，。。。
-    def FetchStockLiutongpanInfo(self):
-        self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==1]['nonrestFloatShares']     #   totalShares  nonrestfloatA  listDate
+    # 按区间来计算股票的平均涨幅，涨幅中位数
+    def SelectStock(self,tongji_qujian_list,startTopIdx=0,endTopIdx=10):
+        # tongji_qujian_list = [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],
+        #                  ['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],
+        #                  ['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
 
-    def SelectStock(self):
-        tongji_qujian_list = [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],
-                         ['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],
-                         ['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
         # 统计个期间涨幅最好的200支股票的平均涨幅，涨幅中位数，整个市场的平均涨幅，涨幅中位数
         tongji_qujian = pd.DataFrame()
         tongji_qujian['tongji_name'] = pd.Series(dtype=numpy.object,index=tongji_qujian.index)
@@ -588,8 +593,6 @@ class Data():
         # 还可以以周/月为单位，统计下数据
         i = 0
         lastQujianTopList = None
-        startTopIdx=0
-        endTopIdx=10
 
         for qujian in tongji_qujian_list:
             all_df = pd.read_sql('select * from _countchangepercent%s_%s' % (qujian[0],qujian[1]),init.getConn())
@@ -621,29 +624,54 @@ class Data():
 
         # print tongji_qujian
         tongji_qujian.to_sql('_tongji_qujian_%s_%s' % (startTopIdx,endTopIdx),init.getEngine(),if_exists='replace',index=False)
-
-        # #流通盘小于200
-        # df20150905_20151015 = pd.read_sql('select * from _countchangepercent20150905_20151015',init.getConn())
-        # df20151016_20151027 = pd.read_sql('select * from _countchangepercent20151016_20151027',init.getConn())
-        # df20151028_20151103 = pd.read_sql('select * from _countchangepercent20151028_20151103',init.getConn())
-        # df20151104_20151125 = pd.read_sql('select * from _countchangepercent20151104_20151125',init.getConn())
-        # df20151126_20151201 = pd.read_sql('select * from _countchangepercent20151126_20151201',init.getConn())
-        # df20151202_20151231 = pd.read_sql('select * from _countchangepercent20151202_20151231',init.getConn())
-        # df20160101_20160201 = pd.read_sql('select * from _countchangepercent20160101_20160201',init.getConn())
-        # df20160201_20160222 = pd.read_sql('select * from _countchangepercent20160201_20160222',init.getConn())
-        # df20160223_20160229 = pd.read_sql('select * from _countchangepercent20160223_20160229',init.getConn())
-        # df20160301_20160315 = pd.read_sql('select * from _countchangepercent20160301_20160315',init.getConn())
-        # df20160316_20160407 = pd.read_sql('select * from _countchangepercent20160316_20160407',init.getConn())
-        # # df20160323_20160406 = pd.read_sql('select * from _countchangepercent20160323_20160406',init.getConn())
-        #
-        # newStocks = self.allStocksBasicInfo.query('listDate>=\'2015-09-05\'')
-        # newStocksList= newStocks['ticker'].values.tolist()
-        # ddf = df20150905_20151015[~df20150905_20151015['ticker'].isin(newStocksList)].sort_values(by='percent',ascending=False)[0:200]
-        # ddf = map(int,ddf['ticker'].values.tolist())
-        # df20151016_20151027[df20151016_20151027['ticker'].isin(ddf)].sort_values(by='percent',ascending=False)
-
         # 统计0915-1015第一波涨的最好的，在调整期的表现
         pass
+
+    #对统计区间的数据进行汇总
+    def Sum(self,sum_qujian_list):
+        # sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
+        # 统计个期间涨幅最好的200支股票的平均涨幅，涨幅中位数，整个市场的平均涨幅，涨幅中位数
+        sum_qujian = pd.DataFrame()
+        sum_qujian['tongji_name'] = pd.Series(dtype=numpy.object,index=sum_qujian.index)
+        sum_qujian['last_top_idx_mean_sum_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+        sum_qujian['last_top_idx_mean_success_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+        sum_qujian['last_top_all_mean_sum_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+        sum_qujian['last_top_all_mean_success_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+        sum_qujian['last_top_all_median_sum_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+        sum_qujian['last_top_all_median_success_percent'] = pd.Series(dtype=numpy.float64,index=sum_qujian.index)
+
+        i=0
+        for qujian in sum_qujian_list:
+            all_df = pd.read_sql('select * from _tongji_qujian_%s_%s' % (qujian[0],qujian[1]),init.getConn())
+            sum_qujian.at[i,'tongji_name'] = '%s_%s' % (qujian[0],qujian[1])
+
+            last_top_idx_mean_sum_percent = 0.0
+            last_top_idx_mean_success_percent = 0.0
+            last_top_all_mean_sum_percent = 0.0
+            last_top_all_mean_success_percent = 0.0
+            last_top_all_median_sum_percent = 0.0
+            last_top_all_median_success_percent = 0.0
+            for idx in range(0,all_df.shape[0]):
+                if pd.isnull(all_df.iloc[idx]['last_top_mean']) == False:
+                    last_top_idx_mean_sum_percent += (all_df.iloc[idx]['last_top_mean']-all_df.iloc[idx]['idx_percent'])
+                    last_top_idx_mean_success_percent += 1 if (all_df.iloc[idx]['last_top_mean']>all_df.iloc[idx]['idx_percent']) else 0
+                    last_top_all_mean_sum_percent += (all_df.iloc[idx]['last_top_mean']-all_df.iloc[idx]['all_mean'])
+                    last_top_all_mean_success_percent += 1 if (all_df.iloc[idx]['last_top_mean']>all_df.iloc[idx]['all_mean']) else 0
+                    last_top_all_median_sum_percent += (all_df.iloc[idx]['last_top_median']-all_df.iloc[idx]['all_median'])
+                    last_top_all_median_success_percent += 1 if (all_df.iloc[idx]['last_top_median']>all_df.iloc[idx]['all_median']) else 0
+            last_top_idx_mean_success_percent = round(last_top_idx_mean_success_percent/(all_df.shape[0]-1),2)
+            last_top_all_mean_success_percent = round(last_top_all_mean_success_percent/(all_df.shape[0]-1),2)
+            last_top_all_median_success_percent = round(last_top_all_median_success_percent/(all_df.shape[0]-1),2)
+
+            sum_qujian.at[i,'last_top_idx_mean_sum_percent'] = last_top_idx_mean_sum_percent
+            sum_qujian.at[i,'last_top_idx_mean_success_percent'] = last_top_idx_mean_success_percent
+            sum_qujian.at[i,'last_top_all_mean_sum_percent'] = last_top_all_mean_sum_percent
+            sum_qujian.at[i,'last_top_all_mean_success_percent'] = last_top_all_mean_success_percent
+            sum_qujian.at[i,'last_top_all_median_sum_percent'] = last_top_all_median_sum_percent
+            sum_qujian.at[i,'last_top_all_median_success_percent'] = last_top_all_median_success_percent
+            i = i+1
+
+        sum_qujian.to_sql('_sum_qujian',init.getEngine(),if_exists='replace',index=False)
 
     # 获取指数暴跌时，当天涨得好的票
     # 获取超跌的股票
@@ -661,12 +689,59 @@ if __name__ == '__main__':
     init.init()
     data = Data()
     data.InitData()
-    data.SelectStock()
+
+    # # 统计时间区间、股票排名区间
+    # tongji_qujian_list = [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],
+    #                      ['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],
+    #                      ['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
+    # sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
+    # # for sl in sum_qujian_list:
+    # #     data.SelectStock(tongji_qujian_list,sl[0],sl[1])
+    # data.Sum(sum_qujian_list)
+    #得出的结论是强者恒强，
+#     将9.15以来的行情按照指数涨、调整、跌分为11个阶段。统计每个阶段表现好的股票在下个阶段的表现。
+# [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
+# tongji_name表示阶段排名 0——10 指排名前十的，0-20表示排名0-20的
+# 以排名0-10的为例。每个阶段你都买入前十的股票，直到下个阶段卖出，可以超越大盘136.79%，操作成功率是90%。
+# 超越所有股票平均涨幅达到109.86%。操作成功率是80%。超越所有股票涨幅中位数59.49%，操作成功率是70%。
+
+    #以周为单位进行统计。选定一个起始日期，从idx000001中找出以周为单位的区间，生成统计区间
+    startDate = datetime.datetime(2015,8,15)
+    tongji_qujian_list = list()
+    jy_date_list = data.idxd000001.query('tradeDate>=\'%s\'' % startDate.strftime('%Y-%m-%d'))
+    jy_date_list = jy_date_list['tradeDate'].values.tolist()
+    startDate = datetime.datetime.strptime(jy_date_list[0],"%Y-%m-%d")
+    de = (calendar.MONDAY-startDate.weekday()) % 7
+    next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
+
+    i=0
+    for jy in jy_date_list:
+        jyDate = datetime.datetime.strptime(jy,"%Y-%m-%d")
+        if jyDate>=next_Monday:
+            tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[i-1].replace('-','')])
+            startDate = jyDate
+            de = (calendar.MONDAY-startDate.weekday()) % 7
+            next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
+            if next_Monday>= datetime.datetime.now():
+                tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[-1].replace('-','')])
+                break
+        i = i+1
+    print tongji_qujian_list
+    # 对区间进行统计
+    for tj in tongji_qujian_list:
+        data.CountChangePercent(datetime.datetime.strptime(tj[0], "%Y%m%d"),datetime.datetime.strptime(tj[1], "%Y%m%d"))
+    sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
+    for sl in sum_qujian_list:
+        data.SelectStock(tongji_qujian_list,sl[0],sl[1])
+    data.Sum(sum_qujian_list)
+
+
+
 #
 #     # data.test2()
 #     # data.test3()
 #
-#     # data.CountTuijianZiming()
+    # data.CountTuijianZiming()
 #     # data.CountChangePercentN(10)
 #     data.CountChangePercent(datetime.datetime.strptime('20160101', "%Y%m%d"),datetime.datetime.strptime('20160201', "%Y%m%d"))
 #     data.CountChangePercent(datetime.datetime.strptime('20160201', "%Y%m%d"),datetime.datetime.strptime('20160222', "%Y%m%d"))
