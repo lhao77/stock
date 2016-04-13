@@ -19,7 +19,6 @@ class Data():
         self.allStocksBasicInfo = None  #所有的股票基本信息，从datayest_equ中查取的
         self.allFundBasicInfo = None    #所有基金基本信息
         self.allExistTables = set([])    #所有已经存在的表信息
-        self.remainAll = set([])    #剩余待查取的股票代码list
         self.fails = set([]) #下载失败的股票ticker
         self._config = None  #配置信息
         self.qfqFactor = None #前复权因子
@@ -36,6 +35,10 @@ class Data():
     # 获取全部基金基本信息
     def FetchAllFundBasicInfo(self):
         print '开始FetchAllFundBasicInfo'
+        st = init.ts.Market()
+        df = st.MktFund()
+        df.to_sql('datayest_fund',init.getEngine(),if_exists='replace',index=False)
+        self.allFundBasicInfo = df
 
     # 获取所有股票的前复权因子
     def FetchAllStockQfqFactor(self):
@@ -61,12 +64,12 @@ class Data():
         self.qfqFactor = df
 
     #删除除权的表，根据exDivDate删除旧表
-    def DropExDivDate(self,lastFetchDateStr):
+    def DropExDivDate(self,lastFetchDate,exdiv_update_hour):
         df = pd.DataFrame()
-        dt = datetime.datetime.strptime(lastFetchDateStr,"%Y%m%d")
-        dt = dt + datetime.timedelta(days=1)
+        # 在除权更新时间前需要更新当天除权信息
+        dt = lastFetchDate + (datetime.timedelta(days=1) if lastFetchDate.hour>=exdiv_update_hour else datetime.timedelta(days=0))
         now = datetime.datetime.now()
-        while dt.date()<=now.date():
+        while (dt.date()<now.date() or (dt.date()==now.date() and now.hour>=exdiv_update_hour)):
             st = init.ts.Market()
             dateStr = dt.strftime("%Y%m%d")
             ddf = st.MktAdjf(exDivDate=dateStr)
@@ -80,6 +83,9 @@ class Data():
             tn = '%s%06d' % (init.g_mktequd,df.iloc[i]['ticker'])
             cur.execute(init.g_dropSql % tn)
             print tn
+        # 更新config表
+        sql = init.g_update_config % ('last_exdiv_update_time',now.strftime('%Y%m%d%H%M'))
+        cur.execute(sql)
         init.getConn().commit()
         cur.close()
 
@@ -89,21 +95,37 @@ class Data():
         df = pd.read_sql( init.g_selectSql % '_config', init.g_conn)
         if df.shape[0]==1:
             self._config = df.iloc[0]
-        lastDate = datetime.datetime.strptime(self._config['last_daysdata_update_date'], '%Y%m%d')
+        last_basic_info_update_time = datetime.datetime.strptime(self._config['last_basic_info_update_time'], '%Y%m%d%H%M')
+        basic_info_update_hour = int(self._config['basic_info_update_hour'])
+        last_exdiv_update_time = datetime.datetime.strptime(self._config['last_exdiv_update_time'], '%Y%m%d%H%M')
+        exdiv_update_hour = int(self._config['exdiv_update_hour'])
+        last_fetch_time = datetime.datetime.strptime(self._config['last_fetch_time'], '%Y%m%d%H%M')
+        fetch_hour = int(self._config['fetch_hour'])
+        today = datetime.datetime.now()
 
         # 下载基本数据
-        # self.FetchAllStocksBasicInfo()
-        # self.FetchAllStockQfqFactor()
-        # self.FetchAllFundBasicInfo()
+        today_basic_info_update_time = datetime.datetime.now()
+        today_basic_info_update_time = today_basic_info_update_time.replace(hour=basic_info_update_hour,minute=0,second=0,microsecond=0)
+        if last_basic_info_update_time<today_basic_info_update_time :
+            self.FetchAllStocksBasicInfo()
+            # self.FetchAllStockQfqFactor()
+            # self.FetchAllFundBasicInfo()  #数据返回有错误，只能等服务端的修复了，暂时先屏蔽
+            cur = init.getCursor()
+            sql = init.g_update_config % ('last_basic_info_update_time', today.strftime('%Y%m%d%H%M'))
+            cur.execute(sql)
+            init.getConn().commit()
+            cur.close()
 
         #删除除权的表
-        self.DropExDivDate(self._config['last_daysdata_update_date'])
+        self.DropExDivDate(last_exdiv_update_time,exdiv_update_hour)
 
         # 初始化股票基本信息表
         if self.allStocksBasicInfo is None :
             self.allStocksBasicInfo = pd.read_sql( init.g_selct_datayest_equSql, init.getConn())
         if self.qfqFactor is None :
             self.qfqFactor = pd.read_sql(init.g_select_datayest_mktadjf, init.getConn())
+        if self.allFundBasicInfo is None:
+            self.allFundBasicInfo = pd.read_sql(init.g_select_datayest_fund, init.getConn())
 
         # 初始化已存在的表名
         cur = init.getCursor()
@@ -111,41 +133,35 @@ class Data():
         allTmp = cur.fetchall()
         for a in allTmp:
           self.allExistTables.add(a[0])
-        # 过滤已经爬取的数据
-        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
-        for k in kk:
-            tableName = '%s%06d' % (init.g_mktequd,k)
-            bFind = tableName in self.allExistTables
-            if bFind==False:
-                self.remainAll.add(k)
 
         # 更新历史日线数据
         self.FetchAllHistoryDayData()
         # 更新指数日线数据
         self.FetchAllIdxDaysData()
+        # 更新基金日线数据
+        self.FetchAllFundDayData()
 
         # 需要按日期补充下载数据
         today = datetime.datetime.now()
         if today.hour<init.g_fetch_time :
             today = today - datetime.timedelta(days=1)
-        if lastDate.date()<today.date():#是否需要下载数据
+        if last_fetch_time.date()<today.date():#是否需要下载数据
             #根据上次最后更新日期，开始FetchDayData
             #根据现在时间，看是否下午18点之前还是之后，生成2个日期差的交易日列表，FetchDayData这些交易日
-            count = (today.date()-lastDate.date()).days
+            count = (today.date()-last_fetch_time.date()).days
             while count > 0:
                 theDate = (today-datetime.timedelta(days=count-1)).strftime('%Y%m%d')
                 self.FetchDayData(theDate)
                 self.FetchIdxDaysDate(theDate)
                 count = count-1
-
-        #初始化上证指数
-        self.idxd000001 = pd.read_sql('select * from mktidxd000001',init.getConn())
-
         #下载完成后，更新config表
-        sql = init.g_update_config % (today.strftime('%Y%m%d'), lastDate.strftime('%Y%m%d'))
+        sql = init.g_update_config % ('last_fetch_time',today.strftime('%Y%m%d%H%M'))
         cur.execute(sql)
         init.getConn().commit()
         cur.close()
+
+        #初始化上证指数
+        self.idxd000001 = pd.read_sql('select * from mktidxd000001',init.getConn())
 
     #获取股票tick的历史日线数据,beg不填写的话为第一天上市的日期（%Y%m%d格式），end不填写的话为最新日期
     def FetchHistoryDayData(self,ticker,beg=None,end=None,st=init.ts.Market()):
@@ -178,11 +194,34 @@ class Data():
             print '未获取到%s' % ticker
         return False
 
+    #获取所有基金的历史日线数据
+    def FetchAllFundDayData(self):
+        st = init.ts.Market()
+        df = pd.read_sql( init.g_select_datayest_fund, init.g_conn)   #指数基本列表
+        df = df['ticker'].values.tolist()
+        for dd in df:
+            fundTableName = ('%s%s' % (init.g_mktfund,dd)).lower()
+            # 该指数表不存在才需要完全下载
+            if (fundTableName in self.allExistTables) == False:
+                try:
+                    sql = init.g_create_table_mktfund % fundTableName
+                    init.getCursor().execute(sql)
+                    init.getConn().commit()
+                    dm = st.MktFundd(ticker=dd)
+                    dm.to_sql( fundTableName,init.getEngine(),if_exists='append',index=False )
+                    print 'FetchAllFundDayData:%s' % fundTableName
+                    sleep(0.1)
+                except init.MySQLdb.Error,e:
+                    print "Mysql Error %d: %s" % (e.args[0], e.args[1])
+
     #获取所有股票的历史日线数据
     def FetchAllHistoryDayData(self):
-        for a in self.remainAll:
-            tick = ('%06d' % a)
-            self.FetchHistoryDayData(tick)
+        kk = self.allStocksBasicInfo['ticker'].values.tolist()
+        for k in kk:
+            ticker = '%06d' % k
+            bFind = '%s%s' % (init.g_mktequd,ticker) in self.allExistTables
+            if bFind==False:
+                self.FetchHistoryDayData(ticker)
 
     #获取指定日期的日行情数据，并把数据更新到各张表中
     def FetchDayData(self,dateStr):
@@ -220,21 +259,34 @@ class Data():
     def FetchAllIdxDaysData(self):
         st = init.ts.Market()
         df = pd.read_sql( init.g_select_idx, init.g_conn)   #指数基本列表
-        for i in range(0,df.shape[0]):
-            dd = df.iloc[i]
-            idxTableName = ('%s%s' % (init.g_mktidxd,dd['ticker'])).lower()
+        df = df['ticker'].values.tolist()
+        for dd in df:
+            idxTableName = ('%s%s' % (init.g_mktidxd,dd)).lower()
             # 该指数表不存在才需要完全下载
             if (idxTableName in self.allExistTables) == False:
                 try:
                     sql = init.g_create_table_mktidxd % idxTableName
                     init.getCursor().execute(sql)
                     init.getConn().commit()
-                    dm = st.MktIdxd(ticker=dd['ticker'])
+                    dm = st.MktIdxd(ticker=dd)
                     dm.to_sql( idxTableName,init.getEngine(),if_exists='append',index=False )
                     print 'FetchAllIdxDaysData:%s' % idxTableName
                     sleep(0.5)
                 except init.MySQLdb.Error,e:
                     print "Mysql Error %d: %s" % (e.args[0], e.args[1])
+
+    # 获取基金日线数据
+    def FetchFundDaysDate(self,dateStr):
+        st = init.ts.Market()
+        df = st.MktFundd(tradeDate = dateStr)
+        bGetData = df.shape[0]>0
+        if bGetData:
+            print '成功获取%s的基金日行情数据' % dateStr
+        else:
+            print '未获取到%s的基金日行情数据' % dateStr
+        #将基金日行情数据插入到各张表中
+        if bGetData:
+            self.UpdateIdxDaysData(dateStr,df)
 
     # 获取指定日期的指数日行情
     def FetchIdxDaysDate(self,dateStr):
@@ -248,6 +300,30 @@ class Data():
         #将指数日行情数据插入到各张表中
         if bGetData:
             self.UpdateIdxDaysData(dateStr,df)
+
+    # 根据下载的基金日线数据，插入到各张表
+    def UpdateFundDaysData(self,dateStr,df):
+        cur = init.getCursor()
+        for i in range(0,df.shape[0]):    #(df.shape[0]):
+            dd = df.iloc[i]
+            fundTableName = ('%s%s' % (init.g_mktfund,dd['ticker'])).lower()
+            # 该指数表存在    (None if pd.isnull(dd['exchangeCD']) else dd['exchangeCD'])
+            if (fundTableName in self.allExistTables):
+                try:
+                    insertSql = init.g_insert_table_mktfund % \
+                                (fundTableName,dd['secID'],dd['ticker'],dd['exchangeCD'],dd['secShortName'],
+                                 dd['tradeDate'],dd['preClosePrice'],dd['openPrice'],dd['highestPrice'],
+                                 dd['lowestPrice'],dd['closePrice'],dd['CHG'],dd['CHGPct'],dd['turnoverVol'],
+                                 dd['turnoverValue'],dd['discount'],dd['discountRatio'],dd['circulationShares'],
+                                 dd['accumAdjFactor'])
+                    newSql = insertSql.replace('\'nan\'','NULL')
+                    newSql = newSql.replace('nan','NULL')
+                    print newSql
+                    cur.execute(newSql)
+                except init.MySQLdb.Error,e:
+                    print "Mysql Error %d: %s" % (e.args[0], e.args[1])
+        init.getConn().commit()
+        cur.close()
 
     # 根据下载的指数日线数据，插入到各张表
     def UpdateIdxDaysData(self,dateStr,df):
@@ -299,7 +375,6 @@ class Data():
                 pass
         conn.commit()
         cur.close()
-
 
     #得到股票价格autoType 0不复权，1前复权，2后复权
     def GetPrice(self,ticker,_time=datetime.datetime.now(),bForward=True,autoType=1):
@@ -434,6 +509,25 @@ class Data():
         #         except init.MySQLdb.Error,e:
         #             print "Mysql Error %d: %s" % (e.args[0], e.args[1])
         init.getConn().commit()
+
+    # 过滤基金表
+    def test5(self):
+        df = pd.read_sql('select * from datayest_fund',init.getConn())
+        ll = df['ticker'].values.tolist()
+        ss =set([])
+        for l in ll:
+            if ll.count(l)>1:
+                ss.add(l)
+        print ss
+        #删除这些表
+        cur = init.getCursor()
+        for s in ss:
+            sql = init.g_dropSql % ('%s%s' % (init.g_mktfund,s))
+            sql1 = 'delete from %s where ticker=\'%s\' limit 1' % ('datayest_fund',s)
+            cur.execute(sql)
+            cur.execute(sql1)
+        init.getConn().commit()
+        cur.close()
 
     # 根据exDivDate删除旧表
     def test4(self):
@@ -679,6 +773,52 @@ class Data():
     def SelectStock1(self):
         self.idxd000001.query('')
 
+    # 统计20150815以来按周的统计数据
+    def SumByWeek(self):
+                # # 统计时间区间、股票排名区间
+        # tongji_qujian_list = [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],
+        #                      ['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],
+        #                      ['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
+        # sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
+        # # for sl in sum_qujian_list:
+        # #     data.SelectStock(tongji_qujian_list,sl[0],sl[1])
+        # data.Sum(sum_qujian_list)
+        #得出的结论是强者恒强，
+    #     将9.15以来的行情按照指数涨、调整、跌分为11个阶段。统计每个阶段表现好的股票在下个阶段的表现。
+    # [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
+    # tongji_name表示阶段排名 0——10 指排名前十的，0-20表示排名0-20的
+    # 以排名0-10的为例。每个阶段你都买入前十的股票，直到下个阶段卖出，可以超越大盘136.79%，操作成功率是90%。
+    # 超越所有股票平均涨幅达到109.86%。操作成功率是80%。超越所有股票涨幅中位数59.49%，操作成功率是70%。
+
+        #以周为单位进行统计。选定一个起始日期，从idx000001中找出以周为单位的区间，生成统计区间
+        startDate = datetime.datetime(2015,8,15)
+        tongji_qujian_list = list()
+        jy_date_list = data.idxd000001.query('tradeDate>=\'%s\'' % startDate.strftime('%Y-%m-%d'))
+        jy_date_list = jy_date_list['tradeDate'].values.tolist()
+        startDate = datetime.datetime.strptime(jy_date_list[0],"%Y-%m-%d")
+        de = (calendar.MONDAY-startDate.weekday()) % 7
+        next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
+
+        i=0
+        for jy in jy_date_list:
+            jyDate = datetime.datetime.strptime(jy,"%Y-%m-%d")
+            if jyDate>=next_Monday:
+                tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[i-1].replace('-','')])
+                startDate = jyDate
+                de = (calendar.MONDAY-startDate.weekday()) % 7
+                next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
+                if next_Monday>= datetime.datetime.now():
+                    tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[-1].replace('-','')])
+                    break
+            i = i+1
+        print tongji_qujian_list
+        # 对区间进行统计
+        for tj in tongji_qujian_list:
+            data.CountChangePercent(datetime.datetime.strptime(tj[0], "%Y%m%d"),datetime.datetime.strptime(tj[1], "%Y%m%d"))
+        sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
+        for sl in sum_qujian_list:
+            data.SelectStock(tongji_qujian_list,sl[0],sl[1])
+        data.Sum(sum_qujian_list)
 
     # 判断代码为ticker的股票是不是在startDate和endDate之间上市的新股
     def IsNewStock(self,ticker,startDate=datetime.datetime.now(),endDate=datetime.datetime.now()):
@@ -686,61 +826,18 @@ class Data():
 ########################################################################
 
 if __name__ == '__main__':
+    print '开始时间:%s' % datetime.datetime.now()
     init.init()
     data = Data()
     data.InitData()
 
-    # # 统计时间区间、股票排名区间
-    # tongji_qujian_list = [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],
-    #                      ['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],
-    #                      ['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
-    # sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
-    # # for sl in sum_qujian_list:
-    # #     data.SelectStock(tongji_qujian_list,sl[0],sl[1])
-    # data.Sum(sum_qujian_list)
-    #得出的结论是强者恒强，
-#     将9.15以来的行情按照指数涨、调整、跌分为11个阶段。统计每个阶段表现好的股票在下个阶段的表现。
-# [['20150905','20151015'],['20151016','20151027'],['20151028','20151103'],['20151104','20151125'],['20151126','20151201'],['20151202','20151231'],['20160101','20160201'],['20160201','20160222'],['20160223','20160229'],['20160301','20160315'],['20160316','20160407']]
-# tongji_name表示阶段排名 0——10 指排名前十的，0-20表示排名0-20的
-# 以排名0-10的为例。每个阶段你都买入前十的股票，直到下个阶段卖出，可以超越大盘136.79%，操作成功率是90%。
-# 超越所有股票平均涨幅达到109.86%。操作成功率是80%。超越所有股票涨幅中位数59.49%，操作成功率是70%。
-
-    #以周为单位进行统计。选定一个起始日期，从idx000001中找出以周为单位的区间，生成统计区间
-    startDate = datetime.datetime(2015,8,15)
-    tongji_qujian_list = list()
-    jy_date_list = data.idxd000001.query('tradeDate>=\'%s\'' % startDate.strftime('%Y-%m-%d'))
-    jy_date_list = jy_date_list['tradeDate'].values.tolist()
-    startDate = datetime.datetime.strptime(jy_date_list[0],"%Y-%m-%d")
-    de = (calendar.MONDAY-startDate.weekday()) % 7
-    next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
-
-    i=0
-    for jy in jy_date_list:
-        jyDate = datetime.datetime.strptime(jy,"%Y-%m-%d")
-        if jyDate>=next_Monday:
-            tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[i-1].replace('-','')])
-            startDate = jyDate
-            de = (calendar.MONDAY-startDate.weekday()) % 7
-            next_Monday = startDate + datetime.timedelta(days=de if de!=0 else 7)
-            if next_Monday>= datetime.datetime.now():
-                tongji_qujian_list.append([startDate.strftime('%Y%m%d'),jy_date_list[-1].replace('-','')])
-                break
-        i = i+1
-    print tongji_qujian_list
-    # 对区间进行统计
-    for tj in tongji_qujian_list:
-        data.CountChangePercent(datetime.datetime.strptime(tj[0], "%Y%m%d"),datetime.datetime.strptime(tj[1], "%Y%m%d"))
-    sum_qujian_list = [[0,10],[0,20],[0,50],[0,100],[0,200],[20,50],[50,100],[100,200]]
-    for sl in sum_qujian_list:
-        data.SelectStock(tongji_qujian_list,sl[0],sl[1])
-    data.Sum(sum_qujian_list)
-
-
+    # data.SumByWeek()
 
 #
 #     # data.test2()
 #     # data.test3()
-#
+#     data.test5()
+
     # data.CountTuijianZiming()
 #     # data.CountChangePercentN(10)
 #     data.CountChangePercent(datetime.datetime.strptime('20160101', "%Y%m%d"),datetime.datetime.strptime('20160201', "%Y%m%d"))
@@ -776,6 +873,8 @@ if __name__ == '__main__':
     # 1，重新更新datayest_equ
     # 2. FetchAllHistoryDayData会会新股票创建出新表mktequdXXXXXX，并会调用AddPrimaryKey处理好表结构
     # 3. FetchDayData获取到今日行情，并调用UpdateDaysData更新今日行情到各张mktequdXXXXXX中
+
+    print '结束时间:%s' % datetime.datetime.now()
 
 # 2016-3-25 16:31:15 重大修改
 # index字段没什么用，全部去掉，

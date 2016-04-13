@@ -214,6 +214,13 @@ class Market():
         code, result = self.client.getData(vs.MKTREPOD%(secID, ticker, tradeDate, beginDate, endDate, field))
         return _ret_data(code, result)
 
+    def MktFund(self,etfLof='',listStatusCd='L',secID='',ticker='',category='',operationMode='',field=''):
+        """
+            获取基金的基本档案信息，包含基金名称、交易代码、分级情况、所属类别、保本情况、
+            上市信息、相关机构、投资描述等信息。收录了2005年以来的历史数据，数据更新频率为不定期。
+        """
+        code, result = self.client.getData(vs.FUND%(etfLof, listStatusCd, secID, ticker, category, operationMode, field))
+        return _ret_data(code, result)
 
     def MktFundd(self, secID='', ticker='', tradeDate='', beginDate='', endDate='', field=''):
         """

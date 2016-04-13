@@ -12,13 +12,14 @@ g_dropSql = 'drop table if exists %s'
 g_selectSql = 'select * from %s'
 g_selct_datayest_equSql = 'SELECT  secID,ticker,exchangeCD,ListSectorCD,ListSector,transCurrCD,secShortName,secFullName,listStatusCD,listDate,delistDate,equTypeCD,equType,exCountryCD,partyID,totalShares,nonrestFloatShares,nonrestfloatA,officeAddr,primeOperating,endDate,TShEquity FROM datayest_equ'
 g_select_datayest_mktadjf = 'SELECT secID,ticker,exchangeCD,secShortName,secShortNameEn,exDivDate,perCashDiv,perShareDivRatio,perShareTransRatio,allotmentRatio,allotmentPrice,adjFactor,accumAdjFactor,endDate FROM datayest_mktadjf'
+g_select_datayest_fund = 'select * from datayest_fund'
 g_select_idx = 'select * from _idx_'
 g_fetch_time = 18
 g_mktidxd = 'mktidxd'
 g_mktequd = 'mktequd'
-
+g_mktfund = 'mktfund'
 g_datayest_mktadjf = 'datayest_mktadjf'
-g_update_config = 'UPDATE `_config` SET `last_daysdata_update_date`=\'%s\' WHERE (`last_daysdata_update_date`=\'%s\')'
+g_update_config = 'UPDATE `_config` SET `%s`=\'%s\''
 
 g_create_table_mktequd = 'CREATE TABLE IF NOT EXISTS `%s` ( \
   `secID` text,\
@@ -65,6 +66,27 @@ g_create_table_mktidxd = 'CREATE TABLE IF NOT EXISTS `%s` (\
   PRIMARY KEY (`tradeDate`)\
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8'
 
+g_create_table_mktfund = 'CREATE TABLE IF NOT EXISTS `%s` (\
+  `secID` text,\
+  `ticker` bigint(20) DEFAULT NULL,\
+  `exchangeCD` text,\
+  `secShortName` text,\
+  `tradeDate` text,\
+  `preClosePrice` double DEFAULT NULL,\
+  `openPrice` double DEFAULT NULL,\
+  `highestPrice` double DEFAULT NULL,\
+  `lowestPrice` double DEFAULT NULL,\
+  `closePrice` double DEFAULT NULL,\
+  `CHG` double DEFAULT NULL,\
+  `CHGPct` double DEFAULT NULL,\
+  `turnoverVol` bigint(20) DEFAULT NULL,\
+  `turnoverValue` double DEFAULT NULL,\
+  `discount` double DEFAULT NULL,\
+  `discountRatio` double DEFAULT NULL,\
+  `circulationShares` bigint(20) DEFAULT NULL,\
+  `accumAdjFactor` double DEFAULT NULL\
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;'
+
 g_insert_table_mktequd = 'INSERT INTO %s (secID, ticker, secShortName, exchangeCD, tradeDate, \
 preClosePrice, actPreClosePrice, openPrice, highestPrice, lowestPrice, closePrice, turnoverVol, \
 turnoverValue, dealAmount, turnoverRate, accumAdjFactor, negMarketValue, marketValue, PE, PE1, PB, isOpen) \
@@ -73,6 +95,9 @@ VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', 
 
 g_insert_table_mktidxd = 'INSERT INTO `%s` VALUES (\'%s\', \'%s\', \'%s\', \'%s\', \'%s\', \'%s\', %s, %s, \
  %s, %s, %s, %s, %s, %s, %s)'
+
+g_insert_table_mktfund = 'INSERT INTO `%s` VALUES (\'%s\', %s, \'%s\', \'%s\', \'%s\', %s, %s, \
+ %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
 
 g_tuijian_stock_v16_ziming = '_tuijian_stock_v16_ziming'
 g_select_actPreClosePrice = 'SELECT actPreClosePrice FROM `mktequd%s` ORDER BY `tradeDate` DESC LIMIT 0, 2'
