@@ -531,21 +531,21 @@ class Data():
 
     # 根据exDivDate删除旧表
     def test4(self):
-        # df = pd.DataFrame()
-        # dt = datetime.datetime.strptime('20160301',"%Y%m%d")
-        # now = datetime.datetime.now()
-        # while dt.date()<now.date():
-        #     st = init.ts.Market()
-        #     dateStr = dt.strftime("%Y%m%d")
-        #     ddf = st.MktAdjf(exDivDate=dateStr)
-        #     print '%s:%s' % (dateStr,ddf.shape[0])
-        #     if ddf.shape[0]>0:
-        #         df = df.append(ddf,ignore_index=True)
-        #     dt = dt + datetime.timedelta(days=1)
-        # df.to_sql('_exdivdate',init.getEngine(),if_exists='replace',index=False)
+        df = pd.DataFrame()
+        dt = datetime.datetime.strptime('20160301',"%Y%m%d")
+        now = datetime.datetime.now()
+        while dt.date()<now.date():
+            st = init.ts.Market()
+            dateStr = dt.strftime("%Y%m%d")
+            ddf = st.MktAdjf(exDivDate=dateStr)
+            print '%s:%s' % (dateStr,ddf.shape[0])
+            if ddf.shape[0]>0:
+                df = df.append(ddf,ignore_index=True)
+            dt = dt + datetime.timedelta(days=1)
+        df.to_sql('_exdivdate',init.getEngine(),if_exists='replace',index=False)
 
         cur = init.getCursor()
-        df = pd.read_sql('select * from _exdivdate',init.getConn())
+        # df = pd.read_sql('select * from _exdivdate',init.getConn())
         for i in range(0,df.shape[0]):
             tn = '%s%06d' % (init.g_mktequd,df.iloc[i]['ticker'])
             cur.execute(init.g_dropSql % tn)
@@ -554,8 +554,9 @@ class Data():
         cur.close()
 
     # 获取股票的流通盘，市值，。。。
-    def GetStockLiutongpanInfo(self):
-        self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==1]['nonrestFloatShares']     #   totalShares  nonrestfloatA  listDate
+    def GetStockLiutongpanInfo(self,ticker):
+        dd = self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==ticker]     #   totalShares  nonrestfloatA  listDate
+        return  dd.iloc[0]['totalShares'],dd.iloc[0]['nonrestfloatA']
 
     # 测试函数
     def CountTuijianZiming(self):
@@ -601,7 +602,7 @@ class Data():
         df.to_sql('_dav_tongji',init.getEngine(), if_exists='replace',index=False)
 
     # 统计某个区间内股票的涨幅
-    def CountChangePercent(self,startDate,endDate):
+    def CountChangePercent(self,startDate,endDate=datetime.datetime.now(),need_store = True):
         # 因为通联数据库表的数据原因（如果改天停牌，openPrice为0，所以把起始时间提前一天去closePrice）
         ddf = self.idxd000001.query('tradeDate<=\'%s\'' % startDate.strftime("%Y-%m-%d"))
         if ddf.shape[0]==0:
@@ -655,16 +656,18 @@ class Data():
                     df_CountChangePercentN.at[i,'endPrice'] = endPrice
             i = i+1
         # 存储到数据库
-        df_CountChangePercentN.to_sql( ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d"))), init.getEngine(), if_exists='replace',index=False)
+        if need_store:
+            df_CountChangePercentN.to_sql( ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d"))), init.getEngine(), if_exists='replace',index=False)
+        return df_CountChangePercentN
 
     # 统计最近N天股票的涨幅。
-    def CountChangePercentN(self,n):
+    def CountChangePercentN(self,n,need_store = True):
         #计算出N天前的交易日日期
         ddf = self.idxd000001.sort_values(by='tradeDate',ascending=False)
         nn = n-1 if ddf.shape[0]>n else -1
         startDate = datetime.datetime.strptime(ddf.iloc[nn]['tradeDate'], "%Y-%m-%d")
         endDate = datetime.datetime.strptime(ddf.iloc[0]['tradeDate'], "%Y-%m-%d")
-        self.CountChangePercent(startDate,endDate)
+        return self.CountChangePercent(startDate,endDate,need_store)
 
     # 按区间来计算股票的平均涨幅，涨幅中位数
     def SelectStock(self,tongji_qujian_list,startTopIdx=0,endTopIdx=10):
@@ -820,6 +823,26 @@ class Data():
             data.SelectStock(tongji_qujian_list,sl[0],sl[1])
         data.Sum(sum_qujian_list)
 
+    # 有没有上一波类似现在的情况的？分析下
+    # 在大盘3050时的股价，今天到了3050-3100之间，现在的股价，    2016-4-14 10:05:23
+    # 滞胀的，小盘
+    def SelectStock3050(self):
+        sd=datetime.datetime.strptime('20160321','%Y%m%d')
+        df = self.CountChangePercent(startDate=sd,need_store=False)
+        # 过滤掉大市值的
+        guolv = set([])
+        for i in range(0,df.shape[0]):
+            totalShares,nonrestfloatA = self.GetStockLiutongpanInfo(df.iloc[i]['ticker'])
+            total = totalShares*df.iloc[i]['startPrice']/100000000.0
+            floatA = nonrestfloatA*df.iloc[i]['startPrice']/100000000.0
+            if total>200 or floatA>150:
+                guolv.add(df.iloc[i]['ticker'])
+        #
+        df.set_index('ticker')
+        for g in guolv:
+            df = df.drop(df.index['ticker'==g])
+        df.to_sql('_select_stock3050',init.getEngine(),if_exists='replace',index=False)
+
     # 判断代码为ticker的股票是不是在startDate和endDate之间上市的新股
     def IsNewStock(self,ticker,startDate=datetime.datetime.now(),endDate=datetime.datetime.now()):
         self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==ticker]['listDate']
@@ -831,12 +854,13 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
+    # data.SelectStock3050()
     # data.SumByWeek()
 
 #
 #     # data.test2()
 #     # data.test3()
-#     data.test5()
+#     data.test4()
 
     # data.CountTuijianZiming()
 #     # data.CountChangePercentN(10)
