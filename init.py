@@ -7,6 +7,7 @@ import MySQLdb
 
 g_engine = None
 g_conn = None
+g_cur = None
 
 g_dropSql = 'drop table if exists %s'
 g_selectSql = 'select * from %s'
@@ -107,16 +108,18 @@ g_select_price_mktequd_desc = 'SELECT tradeDate,ticker,closePrice,openPrice,accu
 def initDb():
     global g_engine
     global g_conn
+    global g_cur
     g_engine = create_engine('mysql://root:@127.0.0.1/tushare?charset=utf8')
     g_conn=MySQLdb.connect(host='localhost',user='root',passwd='',port=3306,charset='UTF8')
     g_conn.select_db('tushare')
+    g_cur = g_conn.cursor()
 
 def getEngine():
     return g_engine
 def getConn():
     return  g_conn
 def getCursor():
-    return  g_conn.cursor()
+    return  g_cur
 
 def init():
     initDb()
