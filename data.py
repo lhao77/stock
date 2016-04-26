@@ -459,7 +459,7 @@ class Data():
             today = today - datetime.timedelta(hours=24)
             try:
                 df = st.MktIdxd(tradeDate=today.strftime('%Y%m%d'))
-            except e:
+            except Exception as e:
                 print "Error %d: %s" % (e.args[0], e.args[1])
             sleep(0.5)
             print i
@@ -774,6 +774,31 @@ class Data():
         sum_qujian.to_sql('_sum_qujian',init.getEngine(),if_exists='replace',index=False)
         init.getConn().commit()
 
+    # 给2个区间，找出能在两个区间都排在前列的股票
+    def SelectQiangStock(self,tongji_qujian_list,top=200):
+        all_df = list()
+        for qujian in tongji_qujian_list:
+            sql = 'select * from _countchangepercent%s_%s WHERE startDate = \'%s\' ORDER BY percent DESC LIMIT 0, %s' \
+                  % (qujian[0],qujian[1],datetime.datetime.strptime(qujian[0], "%Y%m%d").strftime("%Y-%m-%d"),top)
+            df = pd.read_sql(sql,init.getConn())
+            all_df.append(df)
+
+        select_tickers = list()
+        size = len(all_df)
+        kk = self.allStocksBasicInfo['ticker'].values.tolist()
+        for k in kk:
+            count = 0
+            idx = 0
+            for df in all_df:
+                dd = df.query(('ticker==%s' % k))
+                if dd.shape[0]==1:
+                    count = count+1
+            if count==size:
+                select_tickers.append(k)
+        print select_tickers
+
+
+
     # 获取指数暴跌时，当天涨得好的票
     # 获取超跌的股票
     # 初始形成多台排列的技术指标，后面怎么发展
@@ -848,6 +873,8 @@ class Data():
         df.to_sql('_select_stock3050',init.getEngine(),if_exists='replace',index=False)
         init.getConn().commit()
 
+    #统计暴跌当天表现好的股票第二天的涨幅
+
     # 判断代码为ticker的股票是不是在startDate和endDate之间上市的新股
     def IsNewStock(self,ticker,startDate=datetime.datetime.now(),endDate=datetime.datetime.now()):
         self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==ticker]['listDate']
@@ -859,8 +886,12 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
+    qujian=[['20150817','20160426'],['20160104','20160426']]
+    data.SelectQiangStock(qujian)
+    # data.CountChangePercent(datetime.datetime.strptime('20150817', "%Y%m%d"))
+    # data.CountChangePercent(datetime.datetime.strptime('20160104', "%Y%m%d"))
     # data.SelectStock3050()
-    data.SumByWeek()
+    # data.SumByWeek()
 
 #
 #     # data.test2()
