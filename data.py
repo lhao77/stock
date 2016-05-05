@@ -602,7 +602,7 @@ class Data():
         init.getConn().commit()
 
     # 统计某个区间内股票的涨幅
-    def CountChangePercent(self,startDate,endDate=datetime.datetime.now(),need_store = True):
+    def CountChangePercent(self,startDate,endDate=datetime.datetime.now(),need_store = True,need_exclude_new_store = False):
         # 因为通联数据库表的数据原因（如果改天停牌，openPrice为0，所以把起始时间提前一天去closePrice）
         ddf = self.idxd000001.query('tradeDate<=\'%s\'' % startDate.strftime("%Y-%m-%d"))
         if ddf.shape[0]==0:
@@ -631,7 +631,7 @@ class Data():
         i=0
         for ticker,secShortName in kk.iteritems():
             stock_mktequd_name = '%s%06d' % (init.g_mktequd,ticker)
-            if stock_mktequd_name in self.allExistTables:
+            if (stock_mktequd_name in self.allExistTables) & (self.IsNewStock(ticker,trueStartDate,trueEndDate)==False):
                 # if count ==10:
                 #     break
                 # count = count+1
@@ -656,10 +656,11 @@ class Data():
                     df_CountChangePercentN.at[i,'endPrice'] = endPrice
             i = i+1
         # 存储到数据库
+        tableName = ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d")))
         if need_store:
-            df_CountChangePercentN.to_sql( ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d"))), init.getEngine(), if_exists='replace',index=False)
+            df_CountChangePercentN.to_sql( tableName, init.getEngine(), if_exists='replace',index=False)
             init.getConn().commit()
-        return df_CountChangePercentN
+        return df_CountChangePercentN,tableName
 
     # 统计最近N天股票的涨幅。
     def CountChangePercentN(self,n,need_store = True):
@@ -877,7 +878,13 @@ class Data():
 
     # 判断代码为ticker的股票是不是在startDate和endDate之间上市的新股
     def IsNewStock(self,ticker,startDate=datetime.datetime.now(),endDate=datetime.datetime.now()):
-        self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==ticker]['listDate']
+        listDate = self.allStocksBasicInfo[self.allStocksBasicInfo['ticker']==ticker]
+        if listDate.shape[0]==1:
+            listDate = listDate.iloc[0]['listDate']
+            listDate = datetime.datetime.strptime(listDate, "%Y-%m-%d")
+            return endDate>=listDate>=startDate
+        return False
+
 ########################################################################
 
 if __name__ == '__main__':
@@ -886,8 +893,10 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
-    qujian=[['20150817','20160426'],['20160104','20160426']]
-    data.SelectQiangStock(qujian)
+    data.CountChangePercent(datetime.datetime.strptime('20160315', "%Y%m%d"))
+    # qujian=[['20150817','20160426'],['20160104','20160426']]
+
+    # data.SelectQiangStock(qujian)
     # data.CountChangePercent(datetime.datetime.strptime('20150817', "%Y%m%d"))
     # data.CountChangePercent(datetime.datetime.strptime('20160104', "%Y%m%d"))
     # data.SelectStock3050()
