@@ -9,6 +9,9 @@ g_engine = None
 g_conn = None
 g_cur = None
 
+g_10jqka_url = 'http://stockpage.10jqka.com.cn/%s/'
+g_10jqka_cont_gainian = u"/html/body/div[@class='m_content']/div[@class='m_cont_3']/div[@class='sub_cont_3']/dl[@class='company_details']"
+
 g_dropSql = 'drop table if exists %s'
 g_selectSql = 'select * from %s'
 g_selct_datayest_equSql = 'SELECT  secID,ticker,exchangeCD,ListSectorCD,ListSector,transCurrCD,secShortName,secFullName,listStatusCD,listDate,delistDate,equTypeCD,equType,exCountryCD,partyID,totalShares,nonrestFloatShares,nonrestfloatA,officeAddr,primeOperating,endDate,TShEquity FROM datayest_equ'

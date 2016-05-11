@@ -10,9 +10,20 @@ from time import sleep
 import random
 import pandas as pd
 import numpy
+import requests
+from lxml import etree
 import stock_exception
 
 # ##############################################################
+
+def log(func):
+    def wrapper(*args, **kw):
+        print 'Begin %s at %s:' % (func.__name__, datetime.datetime.now())
+        return func(*args, **kw)
+    return wrapper
+
+################################################################
+
 #数据类
 class Data():
     def __init__(self):
@@ -25,8 +36,8 @@ class Data():
         self.idxd000001 = None #上证指数
 
     # 获取全部股票基本信息
+    @log
     def FetchAllStocksBasicInfo(self):
-        print '开始FetchAllStocksBasicInfo'
         eq = init.ts.Equity()
         df = eq.Equ(equTypeCD='A', listStatusCD='L', field='')
         df.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
@@ -34,8 +45,8 @@ class Data():
         self.allStocksBasicInfo = df
 
     # 获取全部基金基本信息
+    @log
     def FetchAllFundBasicInfo(self):
-        print '开始FetchAllFundBasicInfo'
         st = init.ts.Market()
         df = st.MktFund()
         df.to_sql('datayest_fund',init.getEngine(),if_exists='replace',index=False)
@@ -43,8 +54,8 @@ class Data():
         self.allFundBasicInfo = df
 
     # 获取所有股票的前复权因子
+    @log
     def FetchAllStockQfqFactor(self):
-        print '开始FetchAllStockQfqFactor'
         cur = init.getCursor()
         conn = init.getConn()
         #先删除表
@@ -66,7 +77,70 @@ class Data():
             init.getConn().commit()
         self.qfqFactor = df
 
+    #获取股票的概念分类
+    #获取股票的行业分类（暂时不做 2016-5-10 22:21:20）
+    @log
+    def FetchGainianGroup(self):
+        #基于所有的股票id查取http://stockpage.10jqka.com.cn/300327/，获取到涉及概念，保存到datayest_equ表中
+        stockGainian = pd.DataFrame()
+        stockGainian['ticker'] = pd.Series(dtype=numpy.int64,index=self.allStocksBasicInfo.index)
+        stockGainian['name'] = pd.Series(dtype=numpy.object,index=self.allStocksBasicInfo.index)
+        stockGainian['ref_gainian'] = pd.Series(dtype=numpy.object,index=self.allStocksBasicInfo.index)
+        # kk = self.allStocksBasicInfo['ticker'].values.tolist()
+        gainian = dict()
+        i=0
+        for idx in range(0,self.allStocksBasicInfo.shape[0]) :
+            # if i>2:
+            #     break
+            # i = i+1
+            ticker_str = '%06d' % self.allStocksBasicInfo.iloc[idx]['ticker']
+            r = requests.get(init.g_10jqka_url % ticker_str)
+            page = etree.HTML(r.content)
+            page = etree.HTML(r.text.encode('utf-8'))
+            hs = page.xpath(init.g_10jqka_cont_gainian)
+            str = ''    #涉及概念
+            try:
+                i = 0
+                for child in hs[0].getchildren() :
+                    if child.text == u'涉及概念：':
+                        break
+                    i = i+1
+                if i<len(hs[0].getchildren()):
+                    str = hs[0].getchildren()[i+1].attrib.values()[0]
+            except Exception as e:
+                print e
+            stockGainian.at[idx,'ticker'] = self.allStocksBasicInfo.iloc[idx]['ticker']
+            stockGainian.at[idx,'name'] = self.allStocksBasicInfo.iloc[idx]['secShortName']
+            stockGainian.at[idx,'ref_gainian'] = str
+            idx = idx+1
+            ref_list = str.split(u'，')
+            for ref in ref_list:
+                if gainian.has_key(ref)==False:
+                    gainian[ref] = set()
+                gainian[ref].add(ticker_str)
+
+        #新建一张表，保存所有的概念
+        # print gainian
+        gainian_df = pd.read_sql(init.g_selectSql % '_gainian', init.getConn())
+        idx = 0
+        for n,s in gainian.items():
+            gainian_df.at[idx,'name'] = n
+            gainian_df.at[idx,'stocks'] = ','.join( a for a in s)
+            idx = idx+1
+        init.getCursor().execute((init.g_dropSql % '_gainian')) #在调用replase前，需要先删除表
+        gainian_df.to_sql('_gainian',init.getEngine(),if_exists='replace',index=False)
+        init.getConn().commit()
+
+        #保存到datayest_equ
+        # init.getCursor().execute((init.g_dropSql % 'datayest_equ'))
+        # self.allStocksBasicInfo.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
+        stockGainian.to_sql('_stock_gainian',init.getEngine(),if_exists='replace',index=False)
+        init.getConn().commit()
+
+        pass
+
     #删除除权的表，根据exDivDate删除旧表
+    @log
     def DropExDivDate(self,lastFetchDate,exdiv_update_hour):
         df = pd.DataFrame()
         # 在除权更新时间前需要更新当天除权信息
@@ -92,6 +166,7 @@ class Data():
         init.getConn().commit()
 
     #初始化数据
+    @log
     def InitData(self):
         # 初始化config
         df = pd.read_sql( init.g_selectSql % '_config', init.g_conn)
@@ -127,6 +202,9 @@ class Data():
             self.qfqFactor = pd.read_sql(init.g_select_datayest_mktadjf, init.getConn())
         if self.allFundBasicInfo is None:
             self.allFundBasicInfo = pd.read_sql(init.g_select_datayest_fund, init.getConn())
+
+        #初始化概念 下载时间过长，且更新频率底，每周更新一次差不多了
+        # self.FetchGainianGroup()
 
         # 初始化已存在的表名
         cur = init.getCursor()
@@ -618,6 +696,7 @@ class Data():
         trueStartDate = datetime.datetime.strptime(ddf.iloc[0]['tradeDate'], "%Y-%m-%d")
         trueEndDate = datetime.datetime.strptime(ddf.iloc[n-1]['tradeDate'], "%Y-%m-%d")
 
+        stock_gainian = pd.read_sql('select * from _stock_gainian', init.getConn())
         df_CountChangePercentN = pd.DataFrame()
         df_CountChangePercentN['ticker'] = pd.Series(dtype=numpy.int64,index=df_CountChangePercentN.index)
         df_CountChangePercentN['secShortName'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
@@ -626,10 +705,13 @@ class Data():
         df_CountChangePercentN['endPrice'] = pd.Series(dtype=numpy.float64,index=df_CountChangePercentN.index)
         df_CountChangePercentN['startDate'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
         df_CountChangePercentN['endDate'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
+        df_CountChangePercentN['gainian'] = pd.Series(dtype=numpy.object,index=df_CountChangePercentN.index)
+        df_CountChangePercentN['shizhi'] = pd.Series(dtype=numpy.float64,index=df_CountChangePercentN.index)
+        df_CountChangePercentN['liutong'] = pd.Series(dtype=numpy.float64,index=df_CountChangePercentN.index)
         count =0
-        kk = self.allStocksBasicInfo.set_index('ticker')['secShortName'].to_dict()
+        kk = self.allStocksBasicInfo.set_index('ticker').T.to_dict()
         i=0
-        for ticker,secShortName in kk.iteritems():
+        for ticker,value in kk.iteritems():
             stock_mktequd_name = '%s%06d' % (init.g_mktequd,ticker)
             if (stock_mktequd_name in self.allExistTables) & (self.IsNewStock(ticker,trueStartDate,trueEndDate)==False):
                 # if count ==10:
@@ -639,7 +721,7 @@ class Data():
                     print 'CountChangePercent:%s' % count
                 count = count+1
                 df_CountChangePercentN.at[i,'ticker'] = ticker
-                df_CountChangePercentN.at[i,'secShortName'] = secShortName
+                df_CountChangePercentN.at[i,'secShortName'] = value['secShortName']
 
                 str = 'select * from %s where tradeDate>=\'%s\' and tradeDate<=\'%s\' order by tradeDate' % (stock_mktequd_name,trueStartDate.strftime("%Y-%m-%d"),trueEndDate.strftime("%Y-%m-%d"))
                 df = pd.read_sql(str,init.getConn())
@@ -654,6 +736,11 @@ class Data():
                     df_CountChangePercentN.at[i,'percent'] = percent
                     df_CountChangePercentN.at[i,'startPrice'] = startPrice
                     df_CountChangePercentN.at[i,'endPrice'] = endPrice
+                    df_gn = stock_gainian.query('ticker==%s' % ticker)
+                    if df_gn.shape[0]==1:
+                        df_CountChangePercentN.at[i,'gainian'] = df_gn.iloc[0]['ref_gainian']
+                    df_CountChangePercentN.at[i,'shizhi'] = value['totalShares']*startPrice/100000000
+                    df_CountChangePercentN.at[i,'liutong'] = value['nonrestfloatA']*startPrice/100000000
             i = i+1
         # 存储到数据库
         tableName = ('_countchangepercent%s_%s' % (startDate.strftime("%Y%m%d"),endDate.strftime("%Y%m%d")))
@@ -885,6 +972,102 @@ class Data():
             return endDate>=listDate>=startDate
         return False
 
+    '''
+    很多票在主升过程中有回踩动作，研究下，他们在20，30，45,60,120等日线的支撑位后的走势。
+    '''
+    #统计CountChangePercent中市值、流通市值分布，板块分布
+    def SumCountChangePercent(self,tableName,N,bAsc):
+        #市值按
+        def getQujianString(idx,li):
+            length = len(li)
+            if idx<length-1:
+                return '%05d-%05d' % (li[idx],li[idx+1])
+            elif idx==length-1:
+                return '%05d-' % li[idx]
+            else:
+                return 'error'
+
+        shizhi_qujian = [0,50,100,200,300,500,1000]
+        liutong_qujian = map(lambda x:x/2,shizhi_qujian)
+        sz_dict = dict()
+        lt_dict = dict()
+        sql = 'select * from %s order by percent %s limit 0,%s' % (tableName, 'asc' if bAsc==True else 'desc', N)
+        df = pd.read_sql(sql,init.getConn())
+        for i in range(0,df.shape[0]):
+            idx = 0
+            while idx < len(shizhi_qujian):
+                if df.iloc[i]['shizhi']>=shizhi_qujian[idx]:
+                    idx = idx+1
+                else:
+                    break
+            str = getQujianString(idx-1,shizhi_qujian)
+            if sz_dict.has_key(str)==False:
+                sz_dict[str] = set([])
+            sz_dict[str].add(df.iloc[i]['ticker'])
+
+            idx = 0
+            while idx < len(liutong_qujian):
+                if df.iloc[i]['liutong']>liutong_qujian[idx]:
+                    idx = idx+1
+                else:
+                    break
+            str = getQujianString(idx-1,liutong_qujian)
+            if lt_dict.has_key(str)==False:
+                lt_dict[str] = set([])
+            lt_dict[str].add(df.iloc[i]['ticker'])
+        # for k,v in sz_dict.iteritems():
+        #     print k,v
+        # for k,v in lt_dict.iteritems():
+        #     print k,v
+        print sz_dict
+        print lt_dict
+
+        # shizhi_qujian = [0,50,100,200,300,500,1000]
+        # sz_list = list()
+        # sz_str_list = list()
+        # for i in range(0,len(shizhi_qujian)):
+        #     if i<len(shizhi_qujian)-1:
+        #         sz_str_list.append('%s-%s' % (shizhi_qujian[i],shizhi_qujian[i+1]))
+        #         sz_list.append(set([]))
+        #     else:
+        #         sz_str_list.append('%s-' % (shizhi_qujian[i]))
+        #         sz_list.append(set([]))
+        # liutong_qujian = map(lambda x:x/2,shizhi_qujian)
+        # lt_list = list()
+        # lt_str_list = list()
+        # for i in range(0,len(liutong_qujian)):
+        #     if i<len(liutong_qujian)-1:
+        #         lt_str_list.append('%s-%s' % (liutong_qujian[i],liutong_qujian[i+1]))
+        #         lt_list.append(set([]))
+        #     else:
+        #         lt_str_list.append('%s-' % (liutong_qujian[i]))
+        #         lt_list.append(set([]))
+
+        #
+        # sql = 'select * from %s order by percent %s limit 0,%s' % (tableName, 'asc' if bAsc==True else 'desc', N)
+        # df = pd.read_sql(sql,init.getConn())
+        # for i in range(0,df.shape[0]):
+        #     idx = 0
+        #     while idx < len(shizhi_qujian):
+        #         if df.iloc[i]['shizhi']>=shizhi_qujian[idx]:
+        #             idx = idx+1
+        #         else:
+        #             break
+        #     sz_list[idx-1].add(df.iloc[i]['ticker'])
+        #
+        #     idx = 0
+        #     while idx < len(liutong_qujian):
+        #         if df.iloc[i]['liutong']>liutong_qujian[idx]:
+        #             idx = idx+1
+        #         else:
+        #             break
+        #     lt_list[idx-1].add(df.iloc[i]['ticker'])
+        #
+        # for i in range(0,len(sz_list)):
+        #     print sz_str_list[i],len(sz_list[i])
+        # for i in range(0,len(lt_list)):
+        #     print lt_str_list[i],len(lt_list[i])
+
 ########################################################################
 
 if __name__ == '__main__':
@@ -893,7 +1076,9 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
-    data.CountChangePercent(datetime.datetime.strptime('20160315', "%Y%m%d"))
+    # data.CountChangePercent(datetime.datetime.strptime('20160509', "%Y%m%d"),datetime.datetime.strptime('20160512', "%Y%m%d"))
+    # data.SumCountChangePercent('_countchangepercent20160509_20160512',200,False)
+    # data.CountChangePercent(datetime.datetime.strptime('20160315', "%Y%m%d"))
     # qujian=[['20150817','20160426'],['20160104','20160426']]
 
     # data.SelectQiangStock(qujian)
