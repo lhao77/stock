@@ -10,9 +10,20 @@ from time import sleep
 import random
 import pandas as pd
 import numpy
+import requests
+from lxml import etree
 import stock_exception
 
 # ##############################################################
+
+def log(func):
+    def wrapper(*args, **kw):
+        print 'Begin %s at %s:' % (func.__name__, datetime.datetime.now())
+        return func(*args, **kw)
+    return wrapper
+
+################################################################
+
 #数据类
 class Data():
     def __init__(self):
@@ -25,8 +36,8 @@ class Data():
         self.idxd000001 = None #上证指数
 
     # 获取全部股票基本信息
+    @log
     def FetchAllStocksBasicInfo(self):
-        print '开始FetchAllStocksBasicInfo'
         eq = init.ts.Equity()
         df = eq.Equ(equTypeCD='A', listStatusCD='L', field='')
         df.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
@@ -34,8 +45,8 @@ class Data():
         self.allStocksBasicInfo = df
 
     # 获取全部基金基本信息
+    @log
     def FetchAllFundBasicInfo(self):
-        print '开始FetchAllFundBasicInfo'
         st = init.ts.Market()
         df = st.MktFund()
         df.to_sql('datayest_fund',init.getEngine(),if_exists='replace',index=False)
@@ -43,8 +54,8 @@ class Data():
         self.allFundBasicInfo = df
 
     # 获取所有股票的前复权因子
+    @log
     def FetchAllStockQfqFactor(self):
-        print '开始FetchAllStockQfqFactor'
         cur = init.getCursor()
         conn = init.getConn()
         #先删除表
@@ -66,7 +77,64 @@ class Data():
             init.getConn().commit()
         self.qfqFactor = df
 
+    #获取股票的概念分类
+    #获取股票的行业分类（暂时不做 2016-5-10 22:21:20）
+    @log
+    def FetchGainianGroup(self):
+        #基于所有的股票id查取http://stockpage.10jqka.com.cn/300327/，获取到涉及概念，保存到datayest_equ表中
+        self.allStocksBasicInfo['ref_gainian'] = pd.Series(dtype=numpy.object,index=self.allStocksBasicInfo.index)
+        # kk = self.allStocksBasicInfo['ticker'].values.tolist()
+        gainian = dict()
+        i=0
+        for idx in range(0,self.allStocksBasicInfo.shape[0]) :
+            # if i>2:
+            #     break
+            # i = i+1
+            ticker_str = '%06d' % self.allStocksBasicInfo.iloc[idx]['ticker']
+            r = requests.get(init.g_10jqka_url % ticker_str)
+            page = etree.HTML(r.content)
+            page = etree.HTML(r.text.encode('utf-8'))
+            hs = page.xpath(init.g_10jqka_cont_gainian)
+            str = ''    #涉及概念
+            try:
+                i = 0
+                for child in hs[0].getchildren() :
+                    if child.text == u'涉及概念：':
+                        break
+                    i = i+1
+                if i<len(hs[0].getchildren()):
+                    str = hs[0].getchildren()[i+1].attrib.values()[0]
+            except Exception as e:
+                print e
+            self.allStocksBasicInfo.at[idx,'ref_gainian'] = str
+            idx = idx+1
+            ref_list = str.split(u'，')
+            for ref in ref_list:
+                if gainian.has_key(ref)==False:
+                    gainian[ref] = set()
+                gainian[ref].add(ticker_str)
+
+        #新建一张表，保存所有的概念
+        # print gainian
+        gainian_df = pd.read_sql(init.g_selectSql % '_gainian', init.getConn())
+        idx = 0
+        for n,s in gainian.items():
+            gainian_df.at[idx,'name'] = n
+            gainian_df.at[idx,'stocks'] = ','.join( a for a in s)
+            idx = idx+1
+        init.getCursor().execute((init.g_dropSql % '_gainian')) #在调用replase前，需要先删除表
+        gainian_df.to_sql('_gainian',init.getEngine(),if_exists='replace',index=False)
+        init.getConn().commit()
+
+        #保存到datayest_equ
+        init.getCursor().execute((init.g_dropSql % 'datayest_equ'))
+        self.allStocksBasicInfo.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
+        init.getConn().commit()
+
+        pass
+
     #删除除权的表，根据exDivDate删除旧表
+    @log
     def DropExDivDate(self,lastFetchDate,exdiv_update_hour):
         df = pd.DataFrame()
         # 在除权更新时间前需要更新当天除权信息
@@ -92,6 +160,7 @@ class Data():
         init.getConn().commit()
 
     #初始化数据
+    @log
     def InitData(self):
         # 初始化config
         df = pd.read_sql( init.g_selectSql % '_config', init.g_conn)
@@ -127,6 +196,9 @@ class Data():
             self.qfqFactor = pd.read_sql(init.g_select_datayest_mktadjf, init.getConn())
         if self.allFundBasicInfo is None:
             self.allFundBasicInfo = pd.read_sql(init.g_select_datayest_fund, init.getConn())
+
+        #初始化概念 下载时间过长，且更新频率底，每周更新一次差不多了
+        # self.FetchGainianGroup()
 
         # 初始化已存在的表名
         cur = init.getCursor()
@@ -885,6 +957,9 @@ class Data():
             return endDate>=listDate>=startDate
         return False
 
+'''
+很多票在主升过程中有回踩动作，研究下，他们在20，30，45,60等日线的支撑位后的走势。
+'''
 ########################################################################
 
 if __name__ == '__main__':
@@ -893,7 +968,7 @@ if __name__ == '__main__':
     data = Data()
     data.InitData()
 
-    data.CountChangePercent(datetime.datetime.strptime('20160315', "%Y%m%d"))
+    # data.CountChangePercent(datetime.datetime.strptime('20160315', "%Y%m%d"))
     # qujian=[['20150817','20160426'],['20160104','20160426']]
 
     # data.SelectQiangStock(qujian)

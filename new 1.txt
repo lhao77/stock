@@ -10,3 +10,22 @@ ADD PRIMARY KEY (`tradeDate`);
 ALTER TABLE `mktequd603998`
 MODIFY COLUMN `tradeDate`  varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' AFTER `exchangeCD`,
 ADD PRIMARY KEY (`tradeDate`);
+
+#2016-5-10 18:39:13
+
+u"/html/body/div[@class='m_content']/div[@class='m_cont_3']/div[@class='sub_cont_3']/dl[@class='company_details']/dl"
+
+涉及概念：
+
+import requests
+from lxml import etree
+
+r = requests.get('http://stockpage.10jqka.com.cn/300327/')
+page = etree.HTML(r.content)
+page = etree.HTML(r.text.encode('utf-8'))
+hs = page.xpath(u"/html/body/div[@class='m_content']/div[@class='m_cont_3']/div[@class='sub_cont_3']/dl[@class='company_details']")
+hs[0].getchildren()[4].attrib.values()[0]
+f = open('1.txt','w')
+f.write(hs[0].getchildren()[4].attrib.values()[0])
+f.close()
+#'涉及概念：'.decode('utf-8')
