@@ -53,6 +53,11 @@ class Data():
         init.getConn().commit()
         self.allFundBasicInfo = df
 
+    #获取股票的日周月均价
+    @log
+    def FetchDWMJunjia(self):
+        pass
+
     # 获取所有股票的前复权因子
     @log
     def FetchAllStockQfqFactor(self):
@@ -83,9 +88,9 @@ class Data():
     def FetchGainianGroup(self):
         #基于所有的股票id查取http://stockpage.10jqka.com.cn/300327/，获取到涉及概念，保存到datayest_equ表中
         stockGainian = pd.DataFrame()
-        stockGainian['ticker'] = pd.Series(dtype=numpy.int64,index=self.allStocksBasicInfo.index)
-        stockGainian['name'] = pd.Series(dtype=numpy.object,index=self.allStocksBasicInfo.index)
-        stockGainian['ref_gainian'] = pd.Series(dtype=numpy.object,index=self.allStocksBasicInfo.index)
+        stockGainian['ticker'] = pd.Series(dtype=numpy.int64,index=stockGainian.index)
+        stockGainian['name'] = pd.Series(dtype=numpy.object,index=stockGainian.index)
+        stockGainian['ref_gainian'] = pd.Series(dtype=numpy.object,index=stockGainian.index)
         # kk = self.allStocksBasicInfo['ticker'].values.tolist()
         gainian = dict()
         i=0
@@ -131,9 +136,7 @@ class Data():
         gainian_df.to_sql('_gainian',init.getEngine(),if_exists='replace',index=False)
         init.getConn().commit()
 
-        #保存到datayest_equ
-        # init.getCursor().execute((init.g_dropSql % 'datayest_equ'))
-        # self.allStocksBasicInfo.to_sql('datayest_equ',init.getEngine(),if_exists='replace',index=False)
+        #保存到_stock_gainian
         stockGainian.to_sql('_stock_gainian',init.getEngine(),if_exists='replace',index=False)
         init.getConn().commit()
 
@@ -250,7 +253,7 @@ class Data():
         print '查询%s从%s到%s的数据' % (ticker, beg, end)
         bGetData = False
         nLoop = 0
-
+        #init.ts.get_hist_data()
         # 创建表mktequdXXXXXX
         tableName = '%s%s' % (init.g_mktequd,ticker)
         sql = init.g_create_table_mktequd % tableName
@@ -328,7 +331,7 @@ class Data():
                     insertSql = init.g_insert_table_mktequd % (tableName,dd[0],dd[1],dd[2],dd[3],dd[4],dd[5],dd[6],dd[7],dd[8],dd[9],dd[10],dd[11],dd[12],dd[13],dd[14],dd[15],dd[16],dd[17],dd[18],dd[19],dd[20],dd[21])
                     newSql = insertSql.replace('\'nan\'','NULL')
                     newSql = newSql.replace('nan','NULL')
-                    print newSql
+                    # print newSql
                     cur.execute(newSql)
                 except init.MySQLdb.Error,e:
                     print "Mysql Error %d: %s" % (e.args[0], e.args[1])
@@ -398,7 +401,7 @@ class Data():
                                  dd['accumAdjFactor'])
                     newSql = insertSql.replace('\'nan\'','NULL')
                     newSql = newSql.replace('nan','NULL')
-                    print newSql
+                    # print newSql
                     cur.execute(newSql)
                 except init.MySQLdb.Error,e:
                     print "Mysql Error %d: %s" % (e.args[0], e.args[1])
@@ -420,7 +423,7 @@ class Data():
                                  dd['highestIndex'],dd['closeIndex'],dd['turnoverVol'],dd['turnoverValue'],dd['CHG'],dd['CHGPct'])
                     newSql = insertSql.replace('\'nan\'','NULL')
                     newSql = newSql.replace('nan','NULL')
-                    print newSql
+                    # print newSql
                     cur.execute(newSql)
                 except init.MySQLdb.Error,e:
                     print "Mysql Error %d: %s" % (e.args[0], e.args[1])
