@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>763</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QPushButton" name="initDataBtn">
+    <property name="geometry">
+     <rect>
+      <x>60</x>
+      <y>80</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>初始化数据</string>
+    </property>
+   </widget>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>763</width>
+     <height>23</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu">
+    <property name="title">
+     <string>初始化</string>
+    </property>
+    <addaction name="action_init_all"/>
+    <addaction name="action_init_basic"/>
+    <addaction name="action_init_gainian"/>
+   </widget>
+   <widget class="QMenu" name="menu_fenxi">
+    <property name="title">
+     <string>分析</string>
+    </property>
+    <addaction name="action_V"/>
+    <addaction name="action_find"/>
+   </widget>
+   <widget class="QMenu" name="menu_group">
+    <property name="title">
+     <string>股票分组</string>
+    </property>
+    <addaction name="action_rt_data"/>
+    <addaction name="action_group"/>
+   </widget>
+   <widget class="QMenu" name="menu_about">
+    <property name="title">
+     <string>关于</string>
+    </property>
+    <addaction name="action_about"/>
+   </widget>
+   <addaction name="menu"/>
+   <addaction name="menu_fenxi"/>
+   <addaction name="menu_group"/>
+   <addaction name="menu_about"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_init_all">
+   <property name="text">
+    <string>一键初始化</string>
+   </property>
+  </action>
+  <action name="action_init_basic">
+   <property name="text">
+    <string>初始化基本数据</string>
+   </property>
+  </action>
+  <action name="action_init_gainian">
+   <property name="text">
+    <string>初始化概念分类</string>
+   </property>
+  </action>
+  <action name="action_V">
+   <property name="text">
+    <string>统计大V成绩</string>
+   </property>
+  </action>
+  <action name="action_find">
+   <property name="text">
+    <string>查找强势股</string>
+   </property>
+  </action>
+  <action name="action_rt_data">
+   <property name="text">
+    <string>实时数据</string>
+   </property>
+  </action>
+  <action name="action_group">
+   <property name="text">
+    <string>分组管理</string>
+   </property>
+  </action>
+  <action name="action_about">
+   <property name="text">
+    <string>关于</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>action_init_all</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>click_init_all()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>399</x>
+     <y>299</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>initDataBtn</sender>
+   <signal>clicked()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>click_init_all()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>97</x>
+     <y>114</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>399</x>
+     <y>299</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>action_init_basic</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>click_init_basic()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>399</x>
+     <y>299</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>action_init_gainian</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>click_init_gainian()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>399</x>
+     <y>299</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>action_about</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>click_about()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>215</x>
+     <y>45</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>399</x>
+     <y>299</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+ <slots>
+  <slot>click_init_all()</slot>
+  <slot>click_init_basic()</slot>
+  <slot>click_init_gainian()</slot>
+  <slot>click_about()</slot>
+ </slots>
+</ui>
